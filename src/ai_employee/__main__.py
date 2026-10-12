@@ -9,10 +9,11 @@ from .service import CompanyService
 from .contracts import CONTRACTS
 from .store import DEFAULT_DB, Store, StoreError
 from .tools import build_tools
+from .trace import print_event
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Fictional local company sandbox (M1)")
+    parser = argparse.ArgumentParser(description="Autonomous company operator and fictional local sandbox")
     parser.add_argument("--db", default=str(DEFAULT_DB), help="Local sandbox database path")
     commands = parser.add_subparsers(dest="command", required=True)
     reset = commands.add_parser("reset", help="Restore synthetic seed state only")
@@ -23,9 +24,21 @@ def main(argv=None) -> int:
     argument_input = invoke.add_mutually_exclusive_group()
     argument_input.add_argument("--args", default="{}", help="JSON object containing tool arguments")
     argument_input.add_argument("--args-stdin", action="store_true", help="Read JSON arguments from standard input (recommended for PowerShell)")
+    run = commands.add_parser("run", help="Run a goal with the single LangGraph agent and hosted Groq model")
+    run.add_argument("goal", help="Natural-language business goal")
+    run.add_argument("--max-steps", type=int, default=16)
+    run.add_argument("--max-tools", type=int, default=24)
+    run.add_argument("--timeout", type=int, default=180, help="Run time budget in seconds; an in-flight model call may take up to 30 additional seconds")
     args = parser.parse_args(argv)
     store = Store(args.db)
     try:
+        if args.command == "run":
+            from .agent import run_agent
+            result = run_agent(args.goal, CompanyService(store), max_steps=args.max_steps,
+                               max_tool_calls=args.max_tools, timeout_seconds=args.timeout, emit=print_event)
+            # Events were streamed above; do not print them twice or expose history.
+            print_event({"event": "final", **{key: value for key, value in result.items() if key != "trace"}})
+            return 0 if result["status"] == "completed" else 1
         if args.command == "reset":
             store.reset(confirmed=args.yes)
             output = {"ok": True, "data": {"synthetic": True, "database": str(store.path), "reset": True}}

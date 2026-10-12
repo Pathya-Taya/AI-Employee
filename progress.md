@@ -1,7 +1,7 @@
 # AI Employee — Implementation Progress
 
-**Current status:** M0 approved; M1 sandbox/tools implemented and tested, awaiting user review.
-**Current milestone:** M1 — sandbox and tool layer.
+**Current status:** M0/M1 approved; M2 tested offline and live, awaiting user review.
+**Current milestone:** M2 — single-agent LangGraph MVP verified.
 **Time constraint:** Approximately 6–8 hours remained at architecture approval; update time remaining manually as needed.
 
 ## Confirmed setup (from previous development handoff)
@@ -15,13 +15,13 @@
 ## Milestone tracking
 - [x] **M0 — Model preflight:** Groq API key loaded securely; ChatGroq returns one valid structured tool call.
 - [x] **M1 — Sandbox/tool layer:** Synthetic SQLite seed/reset, policies, composable tools and offline tests passed. Commit deferred by explicit user instruction.
-- [ ] **M2 — Agent MVP:** LangGraph + hosted model dynamically executes one persistent change; trace; independent readback; first live passing run; commit.
+- [x] **M2 — Agent MVP:** LangGraph + hosted model dynamically executed persistent changes; trace, independent readback, offline tests and live run passed. No commit per explicit instruction.
 - [ ] **M3 — Multiple operations:** Escalation/task creation and varied requests; generalization test; commit.
 - [ ] **M4 — Hardening:** Safe error paths, duplicate protection, regression tests; commit. *Optional once time is tight.*
 - [ ] **M5 — Submit:** README, no leaked secrets, clean replay, recorded video, GitHub push, form responses.
 
 ## Verified tests and actual runs
-See the verified M0 and M1 runs below. M2–M5 have no tests or runs yet.
+See verified M0, M1, and M2 runs below. M3–M5 have not been implemented or demonstrated.
 
 ## Known issues / constraints
 - Groq authentication and model tool-call access verified. Account billing tier, remaining quota, and sustained rate limits were not independently inspected.
@@ -31,8 +31,8 @@ See the verified M0 and M1 runs below. M2–M5 have no tests or runs yet.
 - Demo-video hosting method not chosen; video link is required.
 
 ## Next action
-1. Review M1 changes and evidence below. No commit or push was made; commit only on explicit request.
-2. Authorize M2 separately after review: wire the single-agent LangGraph flow to the existing tools. No agent graph or model-selected business run exists yet.
+1. Review M2 changes, actual live trace, and independently inspected state below. Code is ready to commit only on explicit request; no commit/push was made.
+2. Authorize M3 separately after review. Do not start multi-ticket/live generalization demonstrations or M4 hardening during this milestone.
 
 ### M0 — Provider/model tool-calling preflight — 2026-10-12
 
@@ -169,6 +169,85 @@ Limitations / next milestone:
 - No graph, public execution trace, model-selected business run, or goal-completion verifier yet. Receipt postcondition checks belong to M1; orchestration and completion semantics remain M2/M3.
 - Existing sandbox restriction still requires approved interpreter execution outside the sandbox. No secrets were read into outputs or committed. Provider quota/billing status is unchanged from M0.
 - Next: await user review and a separate M2 request. Git commit/push: **not performed**, per explicit instruction.
+
+### M2 — LangGraph autonomous agent MVP — 2026-10-12
+
+Implemented:
+- Explicit single-agent `StateGraph` with `agent`, sequential wrapped `tools`, and read-only `verify` nodes and conditional edges. No fixed company tool sequence, new business tools, or service write bypass.
+- Agent state contains goal, message/tool history, revisable concise plan, model/tool budgets, union of declared postconditions, action observations, outcome status, and sanitized public trace events.
+- Existing ten typed tools are dynamically bound to `ChatGroq`. Structured service/validation/unknown-tool errors go back to the model as `ToolMessage` observations.
+- Completion verifier ignores final text and receipt success flags. Fresh SQLite snapshot checks actual records, matching audit IDs/operations/entities, preference intent/evidence, and linked-ticket/task prerequisites. Failed write targets persist until a successful retry; declared requirements cannot be silently dropped. Missing evidence may route back to the agent.
+- Statuses `completed`, `partial`, `blocked`, `failed`; incomplete or failed runs never print an unsupported completion. CLI `python -m ai_employee run "GOAL"` streams public JSON-line events, then a structured final result.
+- Minimal local `.env` configuration; keys remain outside graph state. GPT-OSS reasoning response disabled (`include_reasoning=false`), reasoning metadata discarded, only validated public status is retained. Credential-shaped strings/secret fields are redacted; external tracing disabled.
+- Default caps: 16 model steps, 24 tool executions, 180-second elapsed budget, 30-second request timeout. Model SDK retries disabled; one graph-level HTTP 429 retry per step only when numeric `Retry-After` ≤60 seconds fits remaining budget. Node/tool-boundary checks allow an in-flight model request to overrun the elapsed budget by its request timeout.
+- Minimal public JSON proposal validation, optional JSON code-fence handling, and safe malformed response/config/provider failure reporting. No private model reasoning is displayed.
+
+Files created:
+- `src/ai_employee/agent.py`, `config.py`, `trace.py`, `verify.py`.
+- `tests/test_agent.py` (29 additional offline test cases).
+
+Files modified:
+- `src/ai_employee/__main__.py`, `pyproject.toml`, `requirements.txt`, `README.md`, `progress.md`.
+- M1 service, store, tool contracts/wrappers, fixtures, and policy rules unchanged. M0 preflight and `.env` unchanged.
+- Ignored local artifacts: `logs/m2-live.jsonl` (successful public trace), `logs/m2-final-state.json` (independent inspection), `logs/m2-partial-rate-limit.jsonl`, `logs/m2-initial-failure.jsonl`, mutable `data/sandbox.db`.
+
+Dependencies / installation:
+- Added and pinned `langgraph==1.2.14`.
+- Installed transitive packages: `langgraph-checkpoint==4.2.0`, `langgraph-prebuilt==1.1.0`, `langgraph-sdk==0.4.6`, `ormsgpack==1.12.2`; required `websockets` changed from 17.2 to 16.1.1. No checkpointer/prebuilt agent/SDK service is used by this MVP.
+- Existing `langchain-groq==1.1.3`, `langchain-core==1.6.9`, `groq==0.37.1`, `python-dotenv==1.2.4`, `pydantic==2.14.1`, Python 3.11.9 and pytest 9.1.1 retained.
+
+Commands and actual outcomes (PowerShell):
+```powershell
+& .\.venv\Scripts\python.exe -m pip index versions langgraph
+& .\.venv\Scripts\python.exe -m pip install langgraph==1.2.14
+# An attempted non-isolated metadata refresh failed: invalid command 'bdist_wheel'.
+& .\.venv\Scripts\python.exe -m pip install -e .[test] --no-build-isolation
+# Normal isolated installation succeeded, exit 0.
+& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m pip check
+& .\.venv\Scripts\python.exe -m py_compile scripts/preflight_groq.py src/ai_employee/agent.py src/ai_employee/config.py src/ai_employee/trace.py src/ai_employee/verify.py
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+```
+- Dependency check: exit 0, `No broken requirements found`. Syntax check: exit 0.
+- Offline pytest runs: **86 passed / 0 failed (4.44 s)**; after model-config regression test, **87 passed / 0 failed (4.40 s)**; final after bounded rate retry and fenced-JSON tests, **89 passed / 0 failed (4.44 s)**. Includes all 60 M0/M1 tests.
+- New coverage: real graph routing with fake model + real SQLite tools, strict structured errors and recovery, unknown tools, unsupported/fake completion, missing evidence returning to agent, retained targets and partial results, step/tool/time limits, provider failures before/after writes, malformed responses, reasoning/credential exclusion, forged receipts and stale persisted state, offline changed customer, real ChatGroq construction/binding without network, CLI events, and one bounded HTTP 429 retry.
+
+Hosted attempts and issues (actual, not hypothetical):
+1. Initial CLI attempt exited 1 during local `ChatGroq` construction; **no hosted request**. `reasoning_effort` had incorrectly been included in `model_kwargs`, though this installed integration requires it as a direct parameter. Corrected and added offline real-constructor regression coverage.
+2. First hosted run exited 1 as **partial** after six model steps and three executed tools: `search_customers`, `search_tickets`, `update_customer_preferences`. Preference persisted false with audit 3; fresh CLI reads confirmed customer false and ticket still open. HTTP 429 prevented further model progress. Two responses lacked valid public proposals and prompted corrections. This was never reported completed.
+3. After offline-tested fixes, one additional hosted run from fresh reset succeeded (below). No provider/model switch, manual business-action substitution, or live M3 scenario was used.
+
+Successful live commands (exit 0):
+```powershell
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes
+& .\.venv\Scripts\python.exe -u -m ai_employee run "Find Acme's open request to stop promotional emails, make the permitted preference change, resolve that ticket only after verification, and independently verify the outcome." --timeout 240 | Tee-Object -FilePath logs/m2-live.jsonl
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m2-final-state.json
+```
+
+Actual model-selected tool sequence (no Python business workflow):
+1. `search_customers({"query":"Acme"})`
+2. `search_tickets({"customer_id":1,"query":"stop promotional","status":"open"})`
+3. `update_customer_preferences({"customer_id":1,"marketing_emails_enabled":false,"reason":"Customer request to stop promotional emails","related_ticket_id":1})`
+4. `update_ticket({"reason":"Preference updated per request","status":"resolved","ticket_id":1})`
+
+Working evidence:
+- Final **completed**, **7 model steps**, **4 tool executions**, **2 independently verified actions**, `all_verified=true`; approximately 15:54 IST on 2026-10-12 (trace timestamps are UTC).
+- Customer 1 preference changed **true → false**; audit 3 references related ticket 1 and requested value false.
+- Ticket 1 changed **open → resolved** only after the existing backend checked matching preference state and ticket-specific action evidence; audit 4 records the transition.
+- Completion snapshot independently observed customer false and ticket resolved, with matching persisted audits 3/4 and resolution prerequisite evidence. A separate later `inspect` process confirmed the same state. Other tickets/customers were unchanged; total four customers, eight tickets, one seeded task, four audit events.
+- One HTTP 429 retry succeeded after `Retry-After: 1` second. Safe response headers recorded actual token limit **8000/minute**, remaining requests/tokens and reset durations; no organization identifiers or raw provider error text were logged.
+- Two empty/nonconforming public responses required correction. Final model provided a short revised public plan and both expected postconditions. Tool turns used observed selected-tool labels when no public explanation was supplied. The model did not choose policy-read tools in this run; unchanged backend rules still guarded writes. Do not claim that it consulted policies in this demonstration.
+- Full sanitized trace is in the ignored local `logs/m2-live.jsonl`; failed/partial attempts preserved separately. No credential, hidden reasoning, or raw conversation trace was printed/saved.
+- Git status/staged-name/ignore inspection and `git diff --check` passed (informational LF/CRLF warnings only). No files staged, committed, or pushed; `.env`, DB and logs remain ignored.
+
+Acceptance: **M2 met** — natural-language goal drove a real hosted model-selected tool sequence through the single-agent LangGraph, persisted the requested preference and guarded ticket resolution, and returned independently verified evidence with a public trace.
+
+Remaining limitations / next milestone:
+- Completion certifies supported enumerated postconditions and recorded write targets; it cannot deterministically prove that every implicit part of an arbitrary natural-language goal was interpreted correctly. Read-only or unsupported goals are not certified as business execution success.
+- One real preference/closure scenario demonstrated. Live multi-ticket handling, task/escalation composition and live changed-input generalization remain M3. Fake-model changed-customer tests are explicitly offline routing evidence only.
+- Public JSON compliance and quota availability remain model/provider dependent. Small rate-limit retry is bounded; longer/daily quotas fail honestly. Account billing/free-tier status remains uninspected.
+- No persistent checkpoints, approval/resume system, web UI, new business tools, multi-agent graph, or M4 hardening work.
+- Next: stop for user review before M3. Code ready to commit only upon explicit request; **no automatic commit**.
 
 ## Milestone update template
 Copy this section after each milestone:
