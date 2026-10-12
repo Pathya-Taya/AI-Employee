@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import json
 import re
 
-SECRET_FIELDS = {"api_key", "groq_api_key", "authorization", "password", "token", "secret", "reasoning", "reasoning_content"}
+SECRET_FIELDS = {"api_key", "groq_api_key", "omniroute_api_key", "openai_api_key", "authorization", "password", "token", "secret", "reasoning", "reasoning_content"}
 
 
 def sanitize(value):

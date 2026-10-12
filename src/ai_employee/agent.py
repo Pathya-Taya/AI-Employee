@@ -9,6 +9,14 @@ from email.utils import parsedate_to_datetime
 from typing import Annotated, Literal, TypedDict
 
 from groq import APIConnectionError, APIStatusError, APITimeoutError
+try:
+    from openai import APIConnectionError as OpenAIConnectionError, APIStatusError as OpenAIStatusError, APITimeoutError as OpenAITimeoutError
+except ImportError:  # Groq-only installs need no optional adapter/SDK.
+    STATUS_ERRORS, CONNECTION_ERRORS, TIMEOUT_ERRORS = (APIStatusError,), (APIConnectionError,), (APITimeoutError,)
+else:
+    STATUS_ERRORS = (APIStatusError, OpenAIStatusError)
+    CONNECTION_ERRORS = (APIConnectionError, OpenAIConnectionError)
+    TIMEOUT_ERRORS = (APITimeoutError, OpenAITimeoutError)
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
@@ -76,6 +84,8 @@ class PublicUpdate(Input):
 
 COMPLETION_TOOL = "complete_run"
 MAX_INVALID_RESPONSES = 2  # One correction; a second invalid response stops the run.
+MAX_GENERATION_REJECTIONS = 3  # Two corrections for native provider generation failures.
+MAX_CORRECTIONS = 4  # Global ceiling even when valid calls separate failures.
 MAX_RATE_LIMIT_WAIT = 60
 RESET_BUFFER_SECONDS = 0.25
 
@@ -154,21 +164,25 @@ class AgentState(TypedDict):
     verification: dict
     retry_verification: bool
     invalid_responses: int
+    correction_attempts: int
     correcting: bool
     discovered_ticket_ids: list[int]
 
 
-def provider_problem(error: Exception) -> str:
-    if isinstance(error, APITimeoutError):
-        return "Groq timed out. Retry later; no completion is assumed."
-    if isinstance(error, APIConnectionError):
-        return "Cannot connect to Groq; check network/proxy/TLS access to api.groq.com."
-    if isinstance(error, APIStatusError):
-        messages = {401: "Invalid Groq key; replace GROQ_API_KEY in local .env.",
-                    403: "Groq denied access; check model permissions in the Groq console.",
-                    404: "Groq model unavailable; check openai/gpt-oss-120b access.",
-                    429: "Groq rate/usage limit reached; check console limits and retry after reset."}
-        return messages.get(error.status_code, f"Groq rejected or failed the request (HTTP {error.status_code}); check provider status/model support.")
+def provider_problem(error: Exception, provider="groq") -> str:
+    label = "OmniRoute" if provider == "omniroute" else "Groq"
+    if isinstance(error, TIMEOUT_ERRORS):
+        return f"{label} timed out. Retry later; no completion is assumed."
+    if isinstance(error, CONNECTION_ERRORS):
+        return ("Cannot connect to OmniRoute; start the local gateway and check OMNIROUTE_BASE_URL."
+                if provider == "omniroute" else "Cannot connect to Groq; check network/proxy/TLS access to api.groq.com.")
+    if isinstance(error, STATUS_ERRORS):
+        key_name = "OMNIROUTE_API_KEY" if provider == "omniroute" else "GROQ_API_KEY"
+        messages = {401: f"Invalid {label} key; replace {key_name} in local .env.",
+                    403: f"{label} denied access; check connected model permissions.",
+                    404: f"{label} model unavailable; check the configured model ID and connection.",
+                    429: f"{label} rate/usage limit reached; check provider limits and retry after reset."}
+        return messages.get(error.status_code, f"{label} rejected or failed the request (HTTP {error.status_code}); check provider status/model support.")
     return "Model invocation failed; check dependency compatibility/provider availability."
 
 
@@ -177,6 +191,8 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
     tools = build_tools(service)
     tools[COMPLETION_TOOL] = completion_tool()
     bound = model.bind_tools(list(tools.values()), tool_choice="required")
+    model_metadata = getattr(model, "metadata", None) or {}
+    provider = model_metadata.get("provider", "groq")
     started = time.monotonic()
 
     def log(kind, **details):
@@ -201,14 +217,17 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
         step = state["steps"] + 1
         provider_events = []
 
-        def invalid_response(reason, validation=None):
+        def invalid_response(reason, validation=None, *, generation_rejected=False):
             count = state["invalid_responses"] + 1
-            halt = "Model response correction budget exhausted." if count >= MAX_INVALID_RESPONSES else ""
+            total = state["correction_attempts"] + 1
+            limit = MAX_GENERATION_REJECTIONS if generation_rejected else MAX_INVALID_RESPONSES
+            halt = "Model response correction budget exhausted." if count >= limit or total >= MAX_CORRECTIONS else ""
             return {"steps": step, "proposal": {}, "invalid_responses": count, "correcting": not halt,
+                    "correction_attempts": total,
                     "halt_reason": halt,
                     "messages": [] if halt else [HumanMessage(content="Response format invalid. Use a named business tool with valid arguments, or call complete_run alone with status, action and explicit requirements. No text-only completion.")],
                     "trace": provider_events + [log("model_error", reason=reason, validation=validation or [],
-                                                   invalid_responses=count, correction_requested=not halt)]}
+                                                   invalid_responses=count, correction_attempts=total, correction_requested=not halt)]}
 
         for attempt in range(2):
             try:
@@ -217,7 +236,7 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
             except Exception as error:
                 headers = {}
                 diagnostic = {}
-                if isinstance(error, APIStatusError):
+                if isinstance(error, STATUS_ERRORS):
                     details = error.body if isinstance(error.body, dict) else {}
                     details = details.get("error", details)
                     details = details if isinstance(details, dict) else {}
@@ -227,26 +246,26 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
                                   "error_code": code if code in {"tool_use_failed", "invalid_request_error", "rate_limit_exceeded"} else None,
                                   "tool_generation_rejected": "failed_generation" in details or code == "tool_use_failed"}
                     if error.status_code == 400 and diagnostic["tool_generation_rejected"]:
-                        provider_events.append(log("provider_error", reason="Groq rejected model tool generation; requesting bounded format correction.", **diagnostic))
-                        return invalid_response("Provider rejected structured tool generation.")
+                        provider_events.append(log("provider_error", provider=provider, reason="Provider rejected model tool generation; requesting bounded format correction.", **diagnostic))
+                        return invalid_response("Provider rejected structured tool generation.", generation_rejected=True)
                     headers = {name: error.response.headers[name] for name in (
                         "retry-after", "retry-after-ms", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens",
                         "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests") if name in error.response.headers}
                 wait = rate_limit_delay(headers)
                 remaining = timeout_seconds - (time.monotonic() - started)
-                if (isinstance(error, APIStatusError) and error.status_code == 429 and attempt == 0
+                if (isinstance(error, STATUS_ERRORS) and error.status_code == 429 and attempt == 0
                         and wait is not None and wait + RESET_BUFFER_SECONDS <= MAX_RATE_LIMIT_WAIT
                         and wait + RESET_BUFFER_SECONDS + MODEL_TIMEOUT_SECONDS < remaining):
                     provider_events.append(log("rate_limit_wait", seconds=wait + RESET_BUFFER_SECONDS,
-                                               headers=headers, retry=1, remaining_seconds=round(remaining, 2)))
+                                               provider=provider, headers=headers, retry=1, remaining_seconds=round(remaining, 2)))
                     time.sleep(wait + RESET_BUFFER_SECONDS)
                     if time.monotonic() - started >= timeout_seconds:
                         return {"steps": step, "halt_reason": "Run time budget exhausted during provider wait.",
                                 "trace": provider_events + [log("limit", reason="Run time budget exhausted during provider wait.")]}
                     continue
-                reason = provider_problem(error)
+                reason = provider_problem(error, provider)
                 skipped = ""
-                if isinstance(error, APIStatusError) and error.status_code == 429:
+                if isinstance(error, STATUS_ERRORS) and error.status_code == 429:
                     if attempt:
                         skipped = "The single rate-limit retry was already used."
                     elif wait is None:
@@ -256,7 +275,7 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
                     else:
                         skipped = "Reset wait and request timeout exceed the remaining run budget."
                 return {"steps": step, "halt_reason": reason,
-                        "trace": provider_events + [log("provider_error", reason=reason, headers=headers,
+                        "trace": provider_events + [log("provider_error", provider=provider, reason=reason, headers=headers,
                             suggested_wait_seconds=wait, remaining_seconds=round(max(0, remaining), 2),
                             retry_skipped=skipped, **diagnostic)]}
         if not isinstance(response, AIMessage) or response.invalid_tool_calls:
@@ -292,6 +311,8 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
         return {"steps": step, "messages": [clean_message], "plan": plan, "requirements": requirements,
                 "proposal": {}, "correcting": False,
                 "trace": provider_events + [log("agent", step=step, plan=plan, action=public_action,
+                              provider=provider, configured_model=model_metadata.get("model"),
+                              response_model=str(response.response_metadata.get("model_name", ""))[:200],
                               selected_tools=[call["name"] for call in calls])]}
 
     def tools_node(state):
@@ -301,6 +322,7 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
         proposal = {}
         requirements, plan = list(state["requirements"]), state["plan"]
         invalid_count = state["invalid_responses"]
+        corrections = state["correction_attempts"]
         discovered = set(state["discovered_ticket_ids"])
         calls = state["messages"][-1].tool_calls
         mixed_completion = len(calls) > 1 and any(call["name"] == COMPLETION_TOOL for call in calls)
@@ -348,13 +370,18 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
             messages.append(ToolMessage(content=json.dumps(result), tool_call_id=call["id"], name=name))
         if invalid_completion:
             invalid_count += 1
-            if invalid_count >= MAX_INVALID_RESPONSES:
+            corrections += 1
+            if invalid_count >= MAX_INVALID_RESPONSES or corrections >= MAX_CORRECTIONS:
                 halt = "Model response correction budget exhausted."
             events.append(log("model_error", reason="Invalid typed completion signal.", invalid_responses=invalid_count,
-                              correction_requested=not halt))
+                              correction_attempts=corrections, correction_requested=not halt))
+        elif any(json.loads(message.content).get("ok") for message in messages):
+            # A successful native tool result ends the consecutive-error streak.
+            # The total correction ceiling and run budgets are never reset.
+            invalid_count = 0
         return {"messages": messages, "trace": events, "actions": actions, "tool_calls": count, "halt_reason": halt,
                 "proposal": proposal, "plan": plan, "requirements": requirements, "invalid_responses": invalid_count,
-                "discovered_ticket_ids": sorted(discovered)}
+                "correction_attempts": corrections, "discovered_ticket_ids": sorted(discovered)}
 
     def verify_node(state):
         try:
@@ -421,7 +448,7 @@ def run_agent(goal: str, service: CompanyService, *, model=None, max_steps=16, m
                "trace": [], "actions": [], "plan": ["Discover relevant state and policies", "Perform permitted actions", "Verify persisted outcomes"],
                "requirements": [], "proposal": {}, "steps": 0, "tool_calls": 0, "status": "running",
                "halt_reason": "", "verification": {}, "retry_verification": False,
-               "invalid_responses": 0, "correcting": False, "discovered_ticket_ids": []}
+               "invalid_responses": 0, "correction_attempts": 0, "correcting": False, "discovered_ticket_ids": []}
     state = initial
     try:
         # Stream internal values only into local state; never print message objects.
@@ -440,5 +467,6 @@ def run_agent(goal: str, service: CompanyService, *, model=None, max_steps=16, m
     final = {"status": state["status"], "steps": state["steps"], "tool_calls": state["tool_calls"], "plan": state["plan"],
              "reason": state["halt_reason"], "blockers": list(dict.fromkeys(blockers)),
              "verification": state["verification"], "trace": state["trace"],
+             "completion_proposal_received": bool(state["proposal"]),
              "verification_scope": "Supported declared postconditions, recorded write targets, and discovered unresolved ticket coverage. Scope exclusions/blocker reasons are model declarations; arbitrary natural-language goal interpretation is not proven."}
     return sanitize(final)

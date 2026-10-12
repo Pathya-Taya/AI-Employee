@@ -1,248 +1,277 @@
-# AI Employee — fictional local company sandbox
+# AI Employee
 
-M0–M3 provide a Python 3.11 Groq preflight, a synthetic SQLite company
-environment, and a single-agent LangGraph CLI that chooses and executes tools.
-A lightweight Streamlit interface makes the same agent easy to demonstrate locally.
-All customer records, tickets, tasks, and policies are authored demo fixtures.
-No customer messages, emails, or external business writes are supported.
+A local autonomous company operator: give it a business goal, watch a single
+LangGraph agent discover context and choose tools, then inspect what actually
+changed in SQLite. The prototype addresses the gap between a chatbot describing
+an action and an agent performing a persistent, independently checked operation.
 
-## Setup and tests (PowerShell)
+The demonstration company is entirely **synthetic**: four customers, eight
+support issues, one initial engineering task, audit records and three Markdown
+policies. No customer replies, email delivery, billing, desktop automation or
+real enterprise integrations are implemented. Streamlit and the CLI use the same
+engine and business service.
 
-Use the existing Python 3.11 virtual environment:
+## Architecture and autonomy
 
-```powershell
+~~~mermaid
+flowchart TD
+    U[User goal: Streamlit or CLI] --> A[LangGraph agent node]
+    A -->|Model-selected native calls| T[Typed sequential tool executor]
+    T --> S[Validated company service]
+    S --> D[(SQLite and Markdown policies)]
+    T -->|Actual observations| A
+    A -->|Typed complete_run proposal| V[Independent persisted-state verifier]
+    A -->|Failure or budget exhausted| V
+    V -->|Missing evidence, budget available| A
+    V --> R[Completed / partial / blocked / failed + public trace]
+~~~
+
+**The LLM chooses** records to discover, applicable policy documents, business
+tools, their arguments and order, recovery actions, its short working plan and
+declared final postconditions. There is no configured Acme tool sequence or
+second LLM evaluator. Catalog metadata does not count as policy consultation:
+the model must select a real read_policy call.
+
+**Python defines** fixtures, ten business capabilities, strict schemas, backend
+transition rules, budgets, deterministic verification and presentation. The three
+UI examples supply natural-language goals only. LangGraph owns the execution
+loop; LangChain binds native tools; Groq provides default hosted inference;
+optional OmniRoute routes requests through a local gateway. SQLite owns durable
+business state, separate from in-memory agent state and public execution events.
+
+## Windows setup: Python 3.11
+
+Run PowerShell from the repository root. For a fresh clone, create the environment
+once; keep an existing working .venv:
+
+~~~powershell
+py -3.11 -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
-```
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+~~~
 
-The deterministic tests and manual sandbox commands require no API key and make
-no model requests. Hosted agent runs and M0's optional preflight read
-`GROQ_API_KEY` from local `.env`; copy `.env.example` only
-if `.env` does not exist, replace the placeholder locally, and never share the key.
+Edit .env locally. Set GROQ_API_KEY to your Groq key and leave
+AI_EMPLOYEE_PROVIDER=groq for the verified default model **openai/gpt-oss-120b**.
+Never paste, log or commit credentials. An OmniRoute key does not change the
+selected provider by itself. Configuration comes from local .env without dotenv
+interpolation or reliance on global keys.
 
-```powershell
-& .\.venv\Scripts\python.exe scripts/preflight_groq.py
-```
+Default requirements install runtime, pytest and Streamlit. CLI-only setup is
+available with pip install -e .; pins are in pyproject.toml. Python
+>=3.11,<3.12 is required; no GPU or Docker is needed.
 
-## Local demo interface (PowerShell)
+## Launch the interface
 
-From the repository root, install the existing requirements and launch:
-
-```powershell
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+~~~powershell
 & .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
-```
+~~~
 
-Open **http://127.0.0.1:8501** in your local browser. Select one of the three
-example goals or write your own, then click **Run Agent**. The UI calls the same
-`run_agent` entry point as the CLI; there are no configured tool sequences or
-expected outcomes. The page shows actual public tool events progressively,
-provider quota waits, independently verified operations and audits, unresolved
-work, and initial/final SQLite state differences. Tool names, arguments, actual
-observations and raw structured events remain inspectable. A completion proposal
-does not display as completed until the backend returns verified completion.
+Open **http://127.0.0.1:8501**. Select an example or enter a goal, then click
+**Run Agent** once. The timeline shows real model-selected calls, policy contents,
+actual results, provider waits, errors and verification. Inspect verified
+operations/audits, blockers, discovered-ticket coverage and before/after state.
+Raw sanitized events remain expandable; evidence can be downloaded.
 
-Use **Reset Sandbox** before an independent demo. You must explicitly confirm
-that previous synthetic demo changes will be erased. Existing state is preserved
-on page load. Run and reset controls are disabled during execution; the shared
-local adapter also rejects overlapping actions across browser sessions. Rerenders
-and example selection never launch a run automatically.
+**Reset Sandbox** requires explicit confirmation and erases previous synthetic
+changes, tasks and audits. Page load preserves existing state. A shared background
+controller rejects overlapping run/reset actions and duplicate runs on rerenders.
+Streamlit fragments progressively display actual events, without simulated progress.
 
-UI runs retain the existing 16-step/24-tool caps and use a 360-second budget to
-allow bounded Groq quota waits. An in-flight call can add up to 30 seconds. A
-background worker and Streamlit [fragments](https://docs.streamlit.io/develop/concepts/architecture/fragments)
-keep the page responsive; all Streamlit rendering stays on its script thread.
-Closing/reloading the tab does not cancel an active worker in the same server.
-Restarting the server loses active in-memory UI state; persisted business changes
-remain in SQLite. Avoid concurrent CLI mutations during a demo.
+If writes are independently verified but terminal signaling fails, the UI says:
+**“Business operations verified; final agent completion interrupted.”**
+The overall result stays partial; receipts cannot automatically certify completion.
 
-Download run evidence from the page; sanitized events, final result and snapshots
-are also saved locally under ignored `logs/ui-<run-id>.json`. The UI listens on
-localhost only, has no authentication, and is intended for a local desktop demo.
-No API key is displayed or requested in the UI. It uses the same local `.env`
-setup as the CLI. Stop the server with **Ctrl+C** in its PowerShell window.
-Streamlit is the only new direct dependency (`ui` extra); CLI-only setup remains
-available with `pip install -e .`.
+The server binds localhost, disables telemetry and has no authentication. Run one
+local demonstration at a time; avoid concurrent CLI writes or a second server
+using this DB. Stop with **Ctrl+C**. Reloading keeps an active worker in the same
+server; restart loses in-memory run state while SQLite writes persist. No durable
+checkpoint, cancellation or resume facility is implemented.
 
-UI validation: **166 offline tests passed**. One real Groq engineering run,
-triggered through the page's controls using Streamlit's official testing harness,
-returned `completed`; separate CLI inspection confirmed the linked task,
-escalation and audit evidence. Local page/health endpoints returned HTTP 200.
-A connected browser was unavailable during development, so desktop visual review
-remains manual. Actual events and final state are in ignored `logs/ui-live-*`;
-`progress.md` records the test commands, tool sequence and provider recovery.
+## Terminal demos and independent inspection
 
-## Autonomous agent run
+Reset before each independent demonstration. Save evidence before another reset,
+which intentionally destroys the previous database changes.
 
-Run from the repository root so the agent can load the existing local `.env`:
-
-```powershell
+~~~powershell
 & .\.venv\Scripts\python.exe -m ai_employee reset --yes
-& .\.venv\Scripts\python.exe -m ai_employee run "Find Acme's open request to stop promotional emails, make the permitted preference change, resolve that ticket only after verification, and independently verify the outcome."
 & .\.venv\Scripts\python.exe -m ai_employee inspect
-```
-
-The `agent → tools → agent` loop uses Groq `openai/gpt-oss-120b`. The model chooses
-tool calls and their order. A separate `verify` node reads a fresh SQLite snapshot
-and checks actions against records, audit evidence, and enumerated postconditions.
-The model stops by calling the typed `complete_run` signal alone, with its public
-status and explicit requirements. This signal makes no business writes and does
-not prove completion. Tool selection is required; text-only responses cannot
-claim success. One format correction is allowed per run, then a second invalid
-response stops safely. Valid business calls need no accompanying JSON text.
-Provider HTTP 400 tool-generation rejections share this correction budget;
-unrelated request failures stop immediately. Only allowlisted error codes and
-HTTP status are traced, never provider messages or failed generations.
-Missing evidence can return the run to the model for correction. No code contains
-an Acme workflow. All writes pass through the M1 service and its unchanged rules.
-
-Each public event prints as one JSON line: public plan/action, selected tool,
-sanitized arguments, structured observation, rate-limit/error/limit events, and
-independent verification. If the model supplies no public explanation, the event
-labels its selected tool names. Raw model text, reasoning fields, credentials,
-and conversation objects are not printed. External tracing is disabled.
-
-Final statuses are `completed`, `partial`, `blocked`, or `failed`. CLI exit code
-is 0 only for `completed`, otherwise 1. Completion means the **supported declared
-postconditions and recorded write targets** were independently verified. It does
-not prove that the model interpreted every part of an arbitrary natural-language
-goal correctly. Declared targets cannot be silently dropped; failed write targets
-remain unresolved unless a later retry succeeds. Read-only goals, unenumerated
-requirements, and unsupported business actions cannot be certified by this MVP.
-
-M3 retains every ticket discovered open/blocked through search/detail tools and
-every successful write's related ticket. Later narrower searches cannot erase
-them. The verifier reports `discovered_ticket_ids`, `ticket_coverage`, and
-`coverage_complete`. Resolved/escalated coverage requires a matching verified
-persisted status action and audit. Creating a task alone is not escalation.
-The typed `complete_run.ticket_reports` can explain `blocked` or `out_of_scope`
-tickets with a ticket ID and concrete reason. Blockers force partial/blocked
-status; missing reports appear explicitly and cannot silently become success.
-Scope exclusions and blocker explanations are model declarations, not proof of
-arbitrary natural-language scope. Undiscovered tickets are not certified.
-
-Independent demonstrations start with a reset; save/inspect state before another
-reset. Both requests use the same graph/tools, without a configured tool sequence:
-
-```powershell
-& .\.venv\Scripts\python.exe -m ai_employee reset --yes
-& .\.venv\Scripts\python.exe -m ai_employee run "Investigate Acme's recurring integration issue. Review the relevant ticket and company procedure, arrange engineering follow-up, update the issue's status as permitted, and independently verify the persisted outcome. Do not claim the defect itself is fixed." --timeout 600
+& .\.venv\Scripts\python.exe -m ai_employee run "Find Acme's open request to stop promotional emails. Consult applicable company procedures, make the permitted preference change, resolve its ticket only after verification, and independently verify the outcome." --timeout 360
 & .\.venv\Scripts\python.exe -m ai_employee inspect
 
 & .\.venv\Scripts\python.exe -m ai_employee reset --yes
 & .\.venv\Scripts\python.exe -m ai_employee run "Review Acme's outstanding support issues. Complete whatever actions are permitted by company policy, arrange engineering follow-up where necessary, and report issues that cannot be completed." --max-steps 24 --max-tools 32 --timeout 600
 & .\.venv\Scripts\python.exe -m ai_employee inspect
-```
+~~~
 
-Actual M3 evidence: the engineering run returned `completed` with two verified
-writes; the combined run returned `partial` with four verified writes and all
-three discovered tickets accounted for. Ticket 3 remained open with an explicit
-missing-information blocker. Both runs recovered from HTTP 429 and tool-generation
-HTTP 400. Neither retrieved a valid policy document: the combined run tried an
-unknown policy ID and continued. These are the original M3 runs, before the
-policy-discovery patch below. No defect repair or full procedural compliance is
-claimed. Sanitized traces and independent snapshots are preserved under ignored
-`logs/m3-engineering-*` and `logs/m3-combined-*`; `progress.md` records details.
+The UI also offers engineering escalation. Arranging follow-up does not fix the
+underlying defect. Missing-information issues cannot be resolved by these tools;
+accurate partial reporting is preferable to false success.
 
-Policy tools now advertise the current allowlisted IDs/titles, describe exact-ID
-selection, and return discovery guidance after an invalid lookup. This metadata
-contains no document contents: actual consultation still requires a model-selected
-`read_policy` call. The patch's single live run selected
-`search_customers → search_tickets → read_policy(ticket_lifecycle) → create_task →
-update_ticket → complete_run`, retrieved the valid Markdown document before
-writes, and returned `completed` with two independently verified actions.
-Separate inspection confirmed ticket 2 escalated and linked to engineering task 2,
-with audits 3/4. Evidence is under ignored `logs/m3-policy-discovery-*`.
-The model did not list policies, read the separate escalation document, or select
-`get_task`; discovery/relevance and full procedural compliance remain model-dependent.
-All 140 offline tests passed; no new dependency or business rule was introduced.
+CLI events are JSON lines. Exit code is 0 only for completed, otherwise 1.
+Put --db PATH before the subcommand to override data/sandbox.db. Reset rejects
+databases without the sandbox's application/schema marker.
 
-Defaults: 16 model steps, 24 tool executions, 180 seconds of elapsed run budget,
-30-second model request timeout, and at most one retry per model step on HTTP 429
-when the longest relevant `Retry-After`/token-reset delay, plus a small buffer,
-is at most 60 seconds and leaves room for the 30-second request timeout.
-An exhausted request quota also honors its request-reset header. Unusable or
-over-budget resets fail safely; repeated HTTP 429 is never retried in a loop.
-The tool budget includes the completion signal.
-Budgets are checked at node/tool boundaries; an in-flight model request can finish
-after the elapsed budget. There is no broad provider retry loop or checkpointer.
-Use `--max-steps`, `--max-tools`, and `--timeout` to change these bounded limits.
+To save a local trace:
 
-An earlier genuine M2 run on 2026-10-12 completed in seven model steps with four selected
-tools: `search_customers → search_tickets → update_customer_preferences →
-update_ticket`. It changed Acme's preference to false and resolved ticket 1;
-independent verification checked audit IDs 3 and 4. One short rate-limit retry
-and two public-format corrections occurred. The first hosted attempt stopped
-honestly as partial at HTTP 429 after changing only the preference. Details are
-in `progress.md`; this is evidence of one run, not a guarantee of future model
-behavior. Multi-ticket and live changed-input demonstrations remain for M3.
-
-The targeted reliability patch's earlier single live run persisted both Acme changes and
-successfully waited 45.459 seconds on HTTP 429. A subsequent provider rejection
-prevented the typed terminal proposal; the result was correctly `partial`, with
-two verified actions. Subsequent provider-generation recovery is tested offline
-and was subsequently approved after a successful user-run validation. M3's
-engineering demonstration also recovered from both HTTP 429 and tool-generation
-HTTP 400. See `progress.md` for actual run evidence and limitations.
-
-To retain the sanitized trace locally (logs are Git-ignored):
-
-```powershell
+~~~powershell
 New-Item -ItemType Directory -Path logs -Force | Out-Null
-& .\.venv\Scripts\python.exe -u -m ai_employee run "Handle Acme's promotional email opt-out, close its request after verification, and verify the outcome." | Tee-Object -FilePath logs/demo.jsonl
-```
+& .\.venv\Scripts\python.exe -u -m ai_employee run "Handle Acme's promotional email opt-out, consult procedure, close its request after verification, and verify the outcome." --timeout 360 | Tee-Object -FilePath logs/demo.jsonl
+~~~
 
-## Local sandbox commands
+See [DEMO_GUIDE.md](DEMO_GUIDE.md) for the recording checklist and quota fallback.
+Saved evidence must be labeled as a past run, not a new live execution.
 
-```powershell
-& .\.venv\Scripts\python.exe -m ai_employee reset --yes
-& .\.venv\Scripts\python.exe -m ai_employee inspect
-```
+## Tools, safeguards and verification
 
-The default database is `data/sandbox.db` relative to the current directory.
-Override it with `--db PATH` **before** the subcommand. Reset requires `--yes`,
-restores deterministic fixtures, and rejects databases without this sandbox's
-application/schema marker. Initialization never resets an existing sandbox.
+Business tools: search_customers, get_customer, search_tickets, get_ticket,
+list_policies, read_policy, get_task, update_customer_preferences, create_task
+and update_ticket. The additional complete_run signal declares outcomes and
+performs no writes.
 
-Invoke individual tools without an agent. PowerShell here-strings preserve JSON:
+All writes use the company service: parameterized SQL, strict Pydantic validation,
+foreign keys, transactions, prerequisite checks and successful-write audits.
+Preferences require an active account and explicit intent on the related ticket.
+Closure requires matching stored preference and ticket-specific audit evidence.
+Escalation requires a real linked engineering task for the same ticket. Terminal
+tickets cannot be reopened. Task creation and unchanged write retries reuse state
+without duplicate tasks/audits. Fixture intent is sandbox authorization data, not
+production identity verification. Policy/ticket content is untrusted task data
+and cannot override runtime permissions.
 
-```powershell
-$preferenceArgs = @'
-{"customer_id":1,"marketing_emails_enabled":false,"related_ticket_id":1,"reason":"Recorded customer opt-out"}
-'@
-$preferenceArgs | & .\.venv\Scripts\python.exe -m ai_employee tool update_customer_preferences --args-stdin
-'{"customer_id":1}' | & .\.venv\Scripts\python.exe -m ai_employee tool get_customer --args-stdin
-```
+Receipts contain immediate read-back evidence. The completion verifier opens a
+**fresh SQLite connection** and checks records, matching audits, prerequisites,
+declared postconditions and every recorded write target. Discovered open/blocked
+tickets must have verified terminal updates or explicit blocker/scope reports;
+narrower searches cannot erase them. Forged receipts, missing evidence and invented
+terminal reports cannot certify completion. The UI reads a further snapshot;
+a separate CLI inspect provides an independent process check.
 
-`--args` accepts a JSON object; `--args-stdin` reads it from standard input.
-Writes return mutation receipts with fresh SQLite read-back evidence. Successful
-writes create audits. Retrying task creation returns the original task/details,
-with one task per ticket and no extra audit; it does not silently replace details.
+Verification covers supported postconditions, actions and **discovered** ticket
+coverage. It does not prove arbitrary goal interpretation, undiscovered-ticket
+completeness, policy relevance, or the truth of model-provided scope/blocker
+explanations. Read-only goals cannot be certified completed by this write-oriented
+MVP. Do not claim unrestricted company-wide autonomy.
 
-## Boundaries and tools
+Defaults: 16 model steps, 24 tools and 180 seconds; the UI uses 360 seconds.
+Model timeout is 30 seconds, SDK retries disabled. An in-flight request can finish
+up to 30 seconds after the elapsed budget. At most one HTTP 429 retry per step
+honors the longest usable Retry-After/token-reset header, a 0.25-second buffer,
+60-second wait cap and remaining budget. Missing/over-budget resets stop safely.
 
-`store.py` owns schema, fixtures, connections, and explicit reset. `service.py`
-validates business operations and postconditions. `contracts.py` defines strict
-typed inputs; `tools.py` exposes ten LangChain `StructuredTool` objects through
-`build_tools(service)`. There are no hidden business workflows.
+Malformed responses allow one correction per consecutive streak. Provider native
+generation HTTP 400 rejections allow two. A successful native tool result resets
+the streak; four invalid events overall exhaust the global budget. No correction
+replays a graph or bypasses the service. Traces retain safe HTTP status/allowlisted
+codes, never raw provider errors, rejected generations, API keys or hidden
+reasoning. External tracing is disabled.
 
-Tools: `search_customers`, `get_customer`, `search_tickets`, `get_ticket`,
-`list_policies`, `read_policy`, `get_task`, `update_customer_preferences`,
-`create_task`, `update_ticket`.
+## Optional OmniRoute: adapter implemented, upstream unverified
 
-Preference writes require an active account and a matching related ticket with
-explicit fixture intent. This intent field is sandbox authorization data, not
-production identity verification. Preference closure requires matching persisted
-state and ticket-specific audit evidence. Escalation requires a linked task for
-that ticket. Other categories cannot be resolved by this toolkit; missing info
-can remain open or blocked. Resolved and escalated states are terminal. Policies
-and ticket text are untrusted task data and cannot change these backend rules.
+The adapter uses the gateway's documented OpenAI-compatible Chat Completions
+endpoint through LangChain ChatOpenAI, with the Responses API disabled. See the
+[OmniRoute quick start](https://omniroute.hagicode.com/en-US/getting-started/quick-start/)
+and [LangChain integration](https://docs.langchain.com/oss/python/integrations/chat/openai).
 
-The graph is an explicit `StateGraph` with a sequential wrapped tool executor.
-Company state stays in SQLite; messages, the short plan, budgets, and action
-records live in graph state; sanitized trace events are separate public output.
-Only synthetic local operations are supported. No web server, UI, persistent
-agent checkpoints, arbitrary-goal semantic verifier, or external business
-connector exists. SQLite files, secrets, caches, logs, and build artifacts are
-ignored by Git. Development used Codex coding assistance, LangGraph, LangChain's
-Groq/tool integrations, Pydantic, pytest, and standard-library SQLite.
+~~~powershell
+& .\.venv\Scripts\python.exe -m pip install -e '.[test,ui,omniroute]'
+
+# Separate PowerShell terminal; OmniRoute CLI must already be installed.
+$env:OMNIROUTE_SERVER_HOST = '127.0.0.1'
+omniroute.cmd serve --no-open --no-tray
+~~~
+
+The .cmd entry avoids the disabled-script error on the generated PowerShell entry;
+no execution-policy change is required. Open **http://127.0.0.1:20128** and connect
+an authorized tool-capable upstream. The gateway key authenticates its endpoint;
+it does not establish upstream access/tool compatibility. Catalog presence alone
+does not prove an accessible route.
+
+Keep Groq selected until both non-mutating checks pass for your explicit model ID:
+
+~~~powershell
+# Replace PROVIDER/MODEL with an actual connected catalog ID, never a key.
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider omniroute --model PROVIDER/MODEL --stage mock
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider omniroute --model PROVIDER/MODEL --stage completion
+~~~
+
+The first checks strict mock arguments, native call IDs and sequential ToolMessage
+continuity without DB access. The second checks the actual complete_run schema
+using synthetic postconditions; it does not certify any real business action.
+Only after both pass, edit local .env:
+
+~~~dotenv
+AI_EMPLOYEE_PROVIDER=omniroute
+OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1
+OMNIROUTE_API_KEY=YOUR_LOCAL_ENDPOINT_KEY
+OMNIROUTE_MODEL=YOUR_VERIFIED_MODEL_ID
+~~~
+
+Only localhost HTTP /v1 URLs and explicit IDs are accepted. Auto routing is disabled.
+There is no silent model switch, automatic cross-provider failover or replay.
+Set AI_EMPLOYEE_PROVIDER=groq to restore the existing provider. Restart Streamlit
+after optional installation or provider setup changes.
+
+**Actual final checks, 2026-10-12:** installed gateway **3.8.51**, healthy endpoint,
+no saved authenticated connections. Native mock preflight oc/big-pickle failed
+HTTP **403**; another provider route cfp/openai/gpt-oss-120b failed HTTP **502**.
+No compatible OmniRoute model was verified. Completion/business tests were gated
+off; no business changes were made through the gateway. These statuses do not
+establish the exact upstream cause. Connect an accessible authorized tool-capable
+upstream and pass both checks before adopting OmniRoute. Groq remains the default.
+
+Optional pins: langchain-openai **1.6.7**, openai **2.45.0**, jiter **0.11.0**.
+A newer adapter conflicted with the approved core pin; the newest SDK/parser hit
+local Windows application-control restrictions. The pinned official versions
+loaded and passed offline tests without changing system security settings.
+
+## Tests and actual evidence
+
+~~~powershell
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pip check
+
+# Explicit live compatibility check; not part of pytest.
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider groq --stage completion
+~~~
+
+Pytest uses temporary SQLite and fake tool-calling models and makes **no hosted
+requests**. Optional SDK cases skip without the OmniRoute extra. Latest full suite:
+**193 passed, 0 failed**, pip check clean. The final single Groq preflight returned
+a valid native complete_run call with strictly validated customer/ticket
+requirements. This proves isolated compatibility, not reliability in every longer
+conversation.
+
+Earlier genuine runs demonstrated opt-out/resolution, engineering escalation and
+a combined request with four verified writes plus an honest missing-information
+blocker. The policy-discovery/UI engineering runs actually retrieved
+ticket_lifecycle, created linked task 2, escalated ticket 2 and verified audits
+3/4. The UI run completed with six model-selected tool executions, recovered from
+429/400, and matched separate CLI inspection.
+
+A later manual opt-out trace showed two verified writes but no valid terminal
+proposal after repeated HTTP 400. This patch's bounded recovery and interrupted
+completion display are verified offline. No new end-to-end success is claimed
+after the patch: the conditional OmniRoute business demonstration was blocked.
+
+Local Streamlit page/health endpoints and actual controls were checked with
+Streamlit's official AppTest harness. Final desktop-browser visual review is
+manual. Sanitized runtime evidence remains in ignored logs; [progress.md](progress.md)
+records actual commands, sequences, outcomes, failures and limitations.
+
+## Disclosure and remaining submission work
+
+Built with Python, standard-library sqlite3, LangGraph, LangChain Groq/OpenAI
+adapters, Pydantic, python-dotenv, Streamlit and pytest. OmniRoute is an optional
+prebuilt gateway. Development used **OpenAI Codex/ChatGPT coding assistance**.
+Fixtures, policies and example goals are authored synthetic data. No confidential
+third-party business data or unauthorized external business writes are used.
+Human review is responsible for ownership, understanding and approval.
+
+.env, .venv, databases, logs, caches and build artifacts are Git-ignored. Runtime
+artifacts are generated locally and unnecessary for a clean clone. Source paths
+are portable; no deployment was performed.
+
+Remaining manual steps: review/commit the final patch, push the existing GitHub
+repository, confirm evaluator access, record/upload a real 2–4 minute demo, verify
+both links and fill the form with accurate autonomy/limitation/AI-assistance
+disclosures. No commit, push, deployment or submission is automatic.

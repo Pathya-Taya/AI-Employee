@@ -9,6 +9,7 @@ from ai_employee import ui, ui_adapter
 from ai_employee.ui_adapter import DemoController, EXAMPLES
 from ai_employee.agent import run_agent
 from test_agent import FakeModel, happy_replies
+from test_agent import call, PREFERENCE, CLOSE
 
 
 def page(service, monkeypatch):
@@ -31,6 +32,19 @@ def test_page_loads_and_example_changes_do_not_execute_agent(service, monkeypatc
         assert controller.job is None and not app.exception
     app.run()  # Plain rerender never launches a run.
     assert controller.job is None
+
+
+def test_ui_distinguishes_verified_writes_from_interrupted_terminal_completion(service, monkeypatch):
+    app, controller = page(service, monkeypatch)
+    job = controller.start("Opt out and close", runner=lambda goal, backend, **options: run_agent(
+        goal, backend, model=FakeModel([call("update_customer_preferences", PREFERENCE),
+            call("update_ticket", CLOSE), RuntimeError("PRIVATE")]), **options))
+    assert job.done.wait(10)
+    app.run()
+    assert not app.exception
+    assert any("Business operations verified; final agent completion interrupted." in e.value for e in app.warning)
+    assert not any("Completed" in e.value for e in app.success)
+    assert job.view()["result"]["verification"]["verified_action_count"] == 2
 
 
 def test_reset_button_is_disabled_until_confirmed_and_clears_confirmation(service, store, monkeypatch):

@@ -464,7 +464,7 @@ def test_provider_generation_rejections_share_format_correction_budget(service):
     error = rejected_generation({"error": {"failed_generation": {"attempted_arguments": "private"}}})
     model = FakeModel([error] * 10)
     result = run_agent("Handle opt out", service, model=model)
-    assert result["status"] == "failed" and len(model.histories) == 2
+    assert result["status"] == "failed" and len(model.histories) == 3
     assert "correction budget" in result["reason"]
 
 

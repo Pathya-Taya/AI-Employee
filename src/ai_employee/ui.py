@@ -6,6 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from .service import CompanyService
+from .config import ConfigurationError, model_info
 from .store import DEFAULT_DB, Store
 from .ui_adapter import DemoController, EXAMPLES, UIError, event_view, state_changes
 
@@ -57,6 +58,8 @@ def show_result(view):
     display(labels[status])
     metrics = st.columns(3)
     verification = result.get("verification", {})
+    if verification.get("verified_action_count") and result.get("completion_proposal_received") is False:
+        st.warning("Business operations verified; final agent completion interrupted.")
     metrics[0].metric("Verified operations", verification.get("verified_action_count", 0))
     metrics[1].metric("Tool executions", result.get("tool_calls", 0))
     metrics[2].metric("Elapsed", f'{view["elapsed"]:.0f}s')
@@ -141,7 +144,12 @@ def main():
     busy = controller.busy
     with st.sidebar:
         st.subheader("Demo workspace")
-        st.caption("Groq · openai/gpt-oss-120b\n\nSingle-agent LangGraph · Local SQLite")
+        try:
+            info = model_info()
+            provider_label = "OmniRoute" if info["provider"] == "omniroute" else "Groq"
+            st.caption(f'Configured model: {provider_label} · {info["model"]}\n\nSingle-agent LangGraph · Local SQLite')
+        except ConfigurationError as error:
+            st.warning(str(error))
         st.metric("Customers", len(current.get("customers", [])))
         st.metric("Support issues", len(current.get("tickets", [])))
         st.metric("Engineering tasks", len(current.get("tasks", [])))

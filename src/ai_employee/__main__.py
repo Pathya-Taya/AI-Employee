@@ -24,7 +24,7 @@ def main(argv=None) -> int:
     argument_input = invoke.add_mutually_exclusive_group()
     argument_input.add_argument("--args", default="{}", help="JSON object containing tool arguments")
     argument_input.add_argument("--args-stdin", action="store_true", help="Read JSON arguments from standard input (recommended for PowerShell)")
-    run = commands.add_parser("run", help="Run a goal with the single LangGraph agent and hosted Groq model")
+    run = commands.add_parser("run", help="Run a goal with the single LangGraph agent and configured model provider")
     run.add_argument("goal", help="Natural-language business goal")
     run.add_argument("--max-steps", type=int, default=16)
     run.add_argument("--max-tools", type=int, default=24)

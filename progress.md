@@ -1,13 +1,13 @@
 # AI Employee — Implementation Progress
 
-**Current status:** M0–M3 and policy-discovery patch approved/committed (latest `cbe15d6`); user independently confirmed engineering persistence. Minimal Streamlit UI implemented: 166 offline tests passed, localhost page/health return 200, one real UI-button/harness run completed with independent SQLite confirmation. UI awaiting review; not committed.
-**Current milestone:** Explicitly requested minimal local Streamlit demonstration UI only. Core graph/service/CLI unchanged; no M4/M5 submission or new business work.
+**Current status:** M0–M3, policy discovery and Streamlit UI approved/committed (latest `c6cabd9`). Final targeted stabilization and submission documentation ready for review: 193 offline tests pass, isolated live Groq native completion passes, UI loads. Optional OmniRoute adapter implemented but advertised routes failed HTTP 403/502; no compatible gateway model or new end-to-end run verified. Groq stays default. Final changes uncommitted.
+**Current milestone:** Explicit final engineering request: bounded completion recovery, optional OmniRoute compatibility, UI clarity and reproducibility/submission preparation. Existing single-agent architecture and business rules preserved. Manual visual review, commit/push, video and form remain.
 **Time constraint:** Approximately 6–8 hours remained at architecture approval; update time remaining manually as needed.
 
 ## Confirmed setup (from previous development handoff)
 - Windows + PowerShell + VS Code.
 - Python 3.11.9 and `.venv` prepared.
-- Git initialized; GitHub remote **not yet confirmed**.
+- Git initialized; local origin confirmed as https://github.com/Pathya-Taya/AI-Employee. Public/evaluator access not independently checked.
 - Codex VS Code extension installed; Codex CLI version/auth not independently confirmed (CLI optional).
 - Existing root-level files `implementation_plan.md`, `AGENTS.md`, `.gitignore` have been created earlier; their content should be reviewed after copying finalized plan/instructions.
 - Development machine approximately 16 GB RAM; hosted LLM inference preferred.
@@ -17,23 +17,24 @@
 - [x] **M1 — Sandbox/tool layer:** Synthetic SQLite seed/reset, policies, composable tools and offline tests passed; approved/committed (`d09a2ac`).
 - [x] **M2 — Agent MVP:** Approved/committed (`c0e01b0`, reliability `a7009fe`); user reports successful latest live completion/recovery. M3 also independently reproduced 429/400 recovery.
 - [x] **M3 — Multiple operations:** Approved/committed (`af54fe1`, policy discovery `cbe15d6`); user independently validated engineering persistence.
-- [x] **Local Streamlit demo UI:** Implemented/tested against existing agent; one real UI-triggered engineering run verified. Awaiting review; browser visual inspection remains manual.
-- [ ] **M4 — Hardening:** Safe error paths, duplicate protection, regression tests; commit. *Optional once time is tight.*
-- [ ] **M5 — Submit:** README, no leaked secrets, clean replay, recorded video, GitHub push, form responses.
+- [x] **Local Streamlit demo UI:** Approved/committed (`c6cabd9`); earlier real UI-triggered engineering run verified. Final desktop visual inspection remains manual.
+- [x] **Final targeted hardening:** Bounded completion recovery, optional adapter and focused regressions implemented/tested; review/commit pending. OmniRoute live compatibility remains blocked, not marked achieved.
+- [ ] **Submission:** README/demo guide/secret checks prepared; recorded video, final GitHub push/access confirmation and form submission still required.
 
 ## Verified tests and actual runs
-See verified M0–M3 results below. M4/M5 remain unimplemented. Historical M2 patch limitations below describe that earlier run; the user subsequently validated, approved, and committed M2.
+See historical M0–M3/UI results and the final stabilization section below. Historical failures/successes describe their actual runs; final offline recovery proof and isolated signaling are distinguished from a new hosted business demonstration.
 
 ## Known issues / constraints
 - Groq authentication and model tool-call access verified. Account billing tier, remaining quota, and sustained rate limits were not independently inspected.
 - The execution sandbox cannot access the base Python interpreter; the existing virtual environment works with approved execution outside the sandbox. No Python reinstall or virtual-environment recreation was needed.
-- Repo remote not confirmed.
+- OmniRoute endpoint works, but native-call checks failed on two advertised routes; exact upstream cause unproven and no saved authenticated connections. Do not select it before both preflights pass.
 - All three planning/instruction files verified in the workspace repository.
 - Demo-video hosting method not chosen; video link is required.
 
 ## Next action
-1. Review the UI at `http://127.0.0.1:8501` and evidence in `logs/ui-live-validation.json` / `logs/ui-live-independent-state.json`. Browser connection was unavailable to the coding session; page controls/results were exercised using Streamlit's official harness and the local HTTP page was checked.
-2. Exactly one UI-triggered live run was used. No automatic commit/push/deployment. Reset explicitly before another independent demo. Stop for review before final submission work.
+1. Review the final diff/docs and visually check `http://127.0.0.1:8501`. Final page startup and interrupted-completion behavior are offline tested; historical real UI evidence is preserved under ignored logs.
+2. Use Groq for the working demo. Optional gateway at `http://127.0.0.1:20128` needs an accessible authorized tool-capable upstream and both native preflights before adoption. The sandbox currently remains at its seed state.
+3. Follow DEMO_GUIDE.md to record real simple/multi-ticket evidence, inspect persistence, upload video and verify links. Review/commit/push and complete the submission manually. No automatic commit/push/deployment/submission.
 
 ### M0 — Provider/model tool-calling preflight — 2026-10-12
 
@@ -542,6 +543,82 @@ Limitations / next action:
 - Local desktop UI only; no authentication, deployment, durable worker/checkpoint or cancellation/resume feature. Reload keeps the same in-process job; server restart can interrupt execution, while already committed SQLite changes remain. Don't mutate the same DB concurrently through the CLI or a second server process.
 - Only engineering was run live under the one-run cap. Other example controls and partial/blocked/failure handling are offline validated, not claimed as new live scenarios. The model read ticket lifecycle rather than every applicable policy; full procedural compliance/arbitrary natural-language coverage remain existing limitations.
 - Ready for review with the above validation distinction. No automatic commit/push or final-submission work; stop here.
+
+### Final stabilization, optional OmniRoute adapter and submission preparation — 2026-10-12
+
+Scope and starting evidence:
+- Read the attached final task, AGENTS.md, approved implementation plan and progress; inspected current graph/messages, schemas/native conversion, service, tools, verifier, UI/adapter, tests and saved traces before editing. Starting tree clean at committed UI checkpoint `c6cabd9`. Existing Python 3.11.9 environment retained. No business domains/tools, workflows, UI framework, multiple agents or architecture replacement added.
+- This final request explicitly authorizes targeted reliability, optional routing and submission documentation. No commit, push, public deployment or form submission was performed. Work began approximately 15:17 UTC, within the requested 75-minute maximum.
+
+Completion diagnosis — confirmed facts versus unknowns:
+- Actual manual trace `logs/ui-1e1a0c60337b.json`: `partial`, 10 model steps, 8 tools, 151.5 seconds, two independently verified writes (Acme preference false, ticket 1 resolved), matching audits 5/6 and complete discovered-ticket-1 coverage. No valid terminal completion proposal/requirements arrived; `all_verified=false` correctly prevented overall success.
+- Actual selected sequence: `list_policies`, `search_customers(Acme)`, `search_tickets(customer 1, promotional, open)`, `read_policy(account_preferences)`, `update_customer_preferences`, `get_customer`, `read_policy(ticket_lifecycle)`, `update_ticket(resolved)`. Both policy documents really returned content. Quota waits were 46.495s, 54.047s and 41.387s. After the writes, two consecutive HTTP 400 `tool_use_failed` responses exhausted the original global one-correction allowance. No additional business calls executed during those corrections.
+- Native schema inspection confirmed complete_run is a StructuredTool, converted to a native function schema with required action/requirements/status; nested requirements contain entity_type/entity_id/expected, with additionalProperties in expected plus strict local supported-field/value validation. All eleven tools were bound with tool_choice=required. Correct native AIMessage/ToolMessage IDs, typed local validation and independent verification were already present.
+- Confirmed weakness: one global correction did not tolerate two terminal provider-generation failures; valid earlier tool progress did not restore a correction streak. **Not proven:** the rejected argument shape, a particular nested schema restriction, tool_choice=required as root cause, context size, or an underlying provider capability defect. Raw failed_generation/provider bodies were deliberately never saved, so the exact failed payload cannot be reconstructed. The isolated Groq schema preflight succeeded below; schema incompatibility is not established.
+
+Minimal changes:
+- Separate consecutive invalid-response accounting from a global ceiling. Malformed/invalid completion output permits one correction per streak; provider native-generation rejection permits two. A successful native tool result resets the streak; four invalid events total stop safely. Step/tool/time caps and the single header-aware 429 retry are retained. No whole-run replay, completion inferred from receipts, or forced tool sequence.
+- Added a precise description of the supported expected-field/value contract without changing its validation, persisted-state verifier, coverage rules or business policies. Native completion remains mandatory and independently checked.
+- Added completion_proposal_received to the public final result. UI explicitly displays **“Business operations verified; final agent completion interrupted.”** when writes verify but the terminal proposal is absent. Overall status remains partial. Current configured provider/model is shown accurately; quota notices support both providers. Actual-response model metadata is limited to a sanitized model name in agent events, not raw SDK metadata/reasoning.
+- Optional provider mode in local .env: groq default preserves openai/gpt-oss-120b; omniroute uses local HTTP /v1 through ChatOpenAI Chat Completions, required native tools, timeout 30s, max_retries=0, max_tokens=1200. Only localhost URLs and explicit IDs accepted; auto routes disabled. Secrets use SecretStr and never enter public configuration. Groq/OpenAI-compatible SDK errors use the same bounded header handling and safe HTTP/code diagnostics. No automatic cross-provider failover or silent model switch.
+- Added explicit, non-mutating scripts/preflight_provider.py: strict mock native calls/call IDs and sequential ToolMessage continuity; actual complete_run schema with realistic synthetic requirements. Never accesses/writes the database and never runs as part of pytest. Added gateway/OpenAI secret-field redaction.
+- README rewritten for portable Python 3.11 setup, architecture/autonomy boundaries, default Groq, conditional OmniRoute, UI/CLI, safeguards, genuine evidence, limitations/disclosure and manual submission. DEMO_GUIDE.md covers simple/multi-ticket recording, reset, initial state, real calls/results, fresh inspection, quota fallback and manual GitHub/video/form actions.
+
+Files changed/created:
+- Modified `.env.example`, `README.md`, `pyproject.toml`, `src/ai_employee/__main__.py` (help text only), `agent.py`, `config.py`, `trace.py`, `ui.py`, `ui_adapter.py`, `verify.py` (schema description only), `tests/test_agent.py`, `tests/test_ui_page.py`, `progress.md`.
+- Created `DEMO_GUIDE.md`, `scripts/preflight_provider.py`, `tests/test_final_reliability.py`, `tests/test_provider_config.py`, `tests/test_provider_preflight_offline.py`.
+- Source service/store/contracts/business-tool wrappers and all policy documents unchanged. `.env` unchanged, ignored and untracked. Runtime gateway logs/preflight JSON, UI startup evidence and SQLite snapshots are ignored artifacts, not required in a clone.
+
+Dependencies and actual setup issues:
+- Added optional `omniroute` extra: **langchain-openai 1.6.7, openai 2.45.0, jiter 0.11.0**. Its required tiktoken is **0.14.0**. Existing LangGraph **1.2.14**, langchain-core **1.6.9**, langchain-groq **1.1.3**, groq **0.37.1**, Pydantic **2.14.1**, Streamlit **1.65.0**, pytest **9.1.1**, python-dotenv **1.2.4** retained.
+- Dry-run langchain-openai 1.7.1 conflicted with langchain-core 1.6.9 (exit 1), so selected 1.6.7; core pins not changed. Initial adapter install pulled openai 3.29.0/jiter 0.17.0. A real offline construction test failed because Windows application control blocked the new jiter native extension; first mock preflight also stopped locally before any hosted request. No security settings were changed. Compatible earlier official SDK/parser pins loaded successfully and passed the final suite.
+- Installed gateway **OmniRoute 3.8.51** already existed; no gateway/global Node installation performed. PowerShell's .ps1 entry failed its existing script policy; .cmd entry worked without a policy change. Restricted Node userInfo access prevented help in the managed sandbox; approved outside-sandbox execution worked. Started a hidden gateway helper with OMNIROUTE_SERVER_HOST=127.0.0.1 and no automatic browser/tray, logging locally. The gateway is left running at http://127.0.0.1:20128 for user configuration. No provider credentials/connections were added, exported or altered.
+
+Executed test/setup commands (PowerShell, from repository root):
+```powershell
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pip index versions langchain-openai
+& .\.venv\Scripts\python.exe -m pip install --dry-run 'langchain-openai==1.7.1' 'langchain-core==1.6.9' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip install --dry-run 'langchain-openai==1.6.7' 'langchain-core==1.6.9' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip install -e '.[omniroute]' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip install --dry-run 'openai==2.45.0' 'jiter==0.11.0' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip install 'openai==2.45.0' 'jiter==0.11.0' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip install -e '.[test,ui,omniroute]' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pip check
+& .\.venv\Scripts\python.exe -m compileall -q src scripts streamlit_app.py
+& .\.venv\Scripts\python.exe -m ai_employee --help
+git diff --check
+git status --short
+git diff --cached --name-only
+git check-ignore .env .venv/Scripts/python.exe data/sandbox.db logs/final-independent-state.json .pytest_tmp/sample.db
+git ls-files .env
+```
+- Initial completion-patch suite: **173 passed / 0 failed (14.37s)**. Initial adapter suite: **182 passed / 1 failed (20.03s)**, the actual jiter DLL restriction above. After compatible pins and focused additions: **192 passed / 0 failed (21.48s)**. Final full regression suite: **193 passed / 0 failed (21.76s), exit 0**. Includes 27 additional cases over the committed UI baseline, every M0 offline/M1/M2/M3/UI regression, repeated terminal HTTP 400 recovery/exhaustion, malformed completion, global ceiling, no duplicate audits, provider failure after writes, unsupported/fabricated completion, existing multi-ticket blocker handling, SDK/URL configuration, native preflight validation/continuity, secret redaction and UI interrupted-completion reporting. No test invokes a hosted model.
+- Final documented install, pip check, syntax and CLI checks exited 0. No broken requirements. Whitespace check passed; Git LF/CRLF notices informational. No staged files; only intended source/docs/tests changed. Exact local Groq/OmniRoute credentials scanned against 41 tracked/new source files: **zero matches** (keys never printed). Broad prefix matches occur only in explicitly fake-secret regression fixtures. Secrets, venv, mutable DB, runtime logs and caches are ignored; no machine-specific source path is required.
+
+Actual live compatibility evidence — bounded requests, no business writes:
+```powershell
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider groq --stage completion
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider omniroute --model oc/big-pickle --stage mock
+& .\.venv\Scripts\python.exe scripts/preflight_provider.py --provider omniroute --model cfp/openai/gpt-oss-120b --stage mock
+```
+- **Groq: one live compatibility invocation, passed, exit 0.** Native complete_run, actual typed CompletionProposal validation, status completed, customer 42 marketing_emails_enabled=false and ticket 91 status=resolved synthetic requirements, valid native call ID, no blockers. No mock/business records were persisted and no actual business success is implied. Saved `logs/preflight-groq-completion.json`. No Groq correction attempt or additional Groq business run.
+- Local gateway /api/health and authenticated /v1/models returned HTTP **200**; catalog advertised **465** entries. Safe /api/providers metadata returned **zero saved connections**. The catalog includes built-in connection-free candidates; it does not prove accessibility/native support. Actual key remained private.
+- First OmniRoute mock command initially failed **before network invocation** on blocked jiter import. After the SDK fix, one actual request to explicit advertised free **oc/big-pickle / OpenCode** failed HTTP **403**, exit 1, about **9.6s**. No native calls were validated and no continuation request executed. Safe evidence `logs/preflight-omniroute-mock.json` (script then improved to preserve route-specific filenames).
+- One bounded attempt on a second underlying provider, **cfp/openai/gpt-oss-120b / Cloudflare playground**, failed HTTP **502**, exit 1, about **8.7s**. Safe SDK class OpenAIAPIError, no raw provider body displayed/saved by this application. Evidence `logs/preflight-omniroute-mock-cfp_openai_gpt-oss-120b.json`.
+- **No compatible OmniRoute route verified.** Because native mock preflight failed, actual terminal-schema check and the conditional end-to-end UI business demonstration were not run through the gateway. No auto-route, fallback claim, repeated tuning loop or substituted hardcoded business sequence. HTTP 403/502 alone do not prove the exact upstream/auth/network cause. Groq remains selected by default; local .env provider/model settings were not changed.
+
+UI startup and independent persisted-state evidence:
+- Rendered actual streamlit_app.py with the real cached controller using official Streamlit AppTest, no fake model and no Run click. **0 render errors**, AI Employee title, actual configured **Groq / openai/gpt-oss-120b** label; run disabled with empty goal/reset disabled without confirmation. Fresh before/after snapshots matched; **zero hosted requests**. Evidence `logs/final-ui-startup.json`. Only the expected bare-mode harness ScriptRunContext warning.
+- Existing local Streamlit server remains running: **http://127.0.0.1:8501/_stcore/health → HTTP 200** and page **HTTP 200**. Gateway health **HTTP 200**. Actual `Get-NetTCPConnection -LocalPort 20128,8501 -State Listen` confirmed both listeners bind **127.0.0.1**, not external interfaces. No connected desktop browser was available/used; the user must perform the final visual check as requested.
+- Fresh Store snapshot saved as `logs/final-independent-state.json`, then separately executed `python -m ai_employee inspect` in a child CLI process and saved its complete actual JSON as `logs/final-cli-state.json`. The CLI succeeded and matched the earlier fresh snapshot exactly. Actual current state is the **seed**: Acme marketing preference **true**, tickets **1/2/3 open**, ticket 2 unlinked; four customers/eight tickets/one seeded task/two seeded audits. No business changes or resets were made during this final milestone. The earlier manual failed run's successful writes are historical evidence, not the present DB state.
+- Prior successful Groq policy/UI engineering and multi-operation demonstrations remain valid historical fallback evidence. This patch has **offline** terminal recovery proof plus isolated Groq signaling proof, not a newly completed hosted business run. No final OmniRoute sequence/outcome is fabricated.
+
+Outcome / remaining action:
+- Core Groq architecture, service safeguards, offline regressions, UI clarity and reproducibility/submission docs are ready for final review. Optional OmniRoute **adapter/configuration are implemented; upstream compatibility and live end-to-end acceptance are not met**. No guarantee that all future Groq HTTP 400s recover; longer context/tool-selection reliability remains model/provider-dependent.
+- To unblock OmniRoute: open the local gateway dashboard, configure an authorized accessible tool-capable upstream (not only its local API key), obtain the exact catalog ID, pass both explicit mock and complete_run checks, then set OMNIROUTE_MODEL/AI_EMPLOYEE_PROVIDER=omniroute in local .env. If those fail, keep groq and use the working default for the demo. No additional provider setup/authentication is invented or performed automatically.
+- Exact local commands: `$env:OMNIROUTE_SERVER_HOST = '127.0.0.1'` then `omniroute.cmd serve --no-open --no-tray`; Streamlit `& .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py`. Both README and DEMO_GUIDE include reset/inspect and simple/multi-ticket tasks.
+- Existing remote is configured as https://github.com/Pathya-Taya/AI-Employee; this was a local Git-config check, not confirmation of public/evaluator access. Remaining manual tasks: final desktop visual review, review/commit this patch, push, confirm repository visibility, record/upload a genuine demo, verify video URL, add links and complete submission form/disclosures/ownership confirmations. No video/deployment/submission link was fabricated. Stop for review; no automatic commit/push.
 
 ## Milestone update template
 Copy this section after each milestone:

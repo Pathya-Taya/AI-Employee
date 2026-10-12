@@ -14,7 +14,7 @@ TABLES = {"customer": "customers", "ticket": "tickets", "task": "tasks"}
 class Requirement(Input):
     entity_type: Literal["customer", "ticket", "task"]
     entity_id: EntityId
-    expected: dict = Field(min_length=1)
+    expected: dict = Field(min_length=1, description="Only supported final fields: customer marketing_emails_enabled (boolean); ticket status (open/blocked/resolved/escalated), linked_task_id (positive integer or null); task ticket_id (positive integer), team (engineering), status (open/done). Use JSON field/value pairs, not a prose description.")
 
     @model_validator(mode="after")
     def supported_fields(self):

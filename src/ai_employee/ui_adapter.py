@@ -170,7 +170,8 @@ def event_view(value):
                 summary = "Actual tool result received"
     elif kind == "rate_limit_wait":
         title, level = "Waiting for provider quota", "warning"
-        summary = f"Groq requested a {value.get('seconds', 0):g}-second wait. The backend will retry within its time budget."
+        provider = "OmniRoute" if value.get("provider") == "omniroute" else "Groq"
+        summary = f"{provider} requested a {value.get('seconds', 0):g}-second wait. The backend will retry within its time budget."
     elif kind == "completion_proposal":
         title, summary = "Completion proposed", "Checking actual persisted state before confirming any outcome"
     elif kind == "verification":
