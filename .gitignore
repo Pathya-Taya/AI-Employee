@@ -18,3 +18,8 @@ logs/
 build/
 dist/
 .pytest_tmp/
+
+# Internal development documents
+AGENTS.md
+implementation_plan.md
+progress.md

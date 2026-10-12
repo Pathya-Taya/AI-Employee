@@ -279,8 +279,8 @@ OmniRoute's attempted routes were not verified for live structured tool calling.
 Streamlit page/health checks, controls, and offline UI behavior were tested with
 Streamlit's AppTest harness; the user also visually inspected the desktop UI and
 recorded the successful run. Sanitized runtime traces are local, Git-ignored
-artifacts; [progress.md](progress.md) documents historical evidence and
-limitations.
+artifacts. See [DEMO_GUIDE.md](DEMO_GUIDE.md) for recording and reproducibility
+guidance. The development journal is kept locally and is not required to run the project.
 
 ## Disclosure and remaining submission work
 
