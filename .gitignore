@@ -4,3 +4,13 @@ __pycache__/
 *.pyc
 node_modules/
 .pytest_cache/
+.env.*
+!.env.example
+*.log
+logs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*

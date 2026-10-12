@@ -1,0 +1,3 @@
+# M0 only; use the existing Python 3.11 virtual environment.
+langchain-groq==1.1.3
+python-dotenv==1.2.4
