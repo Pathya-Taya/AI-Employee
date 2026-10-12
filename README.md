@@ -1,6 +1,6 @@
 # AI Employee — fictional local company sandbox
 
-M0–M2 provide a Python 3.11 Groq preflight, a synthetic SQLite company
+M0–M3 provide a Python 3.11 Groq preflight, a synthetic SQLite company
 environment, and a single-agent LangGraph CLI that chooses and executes tools.
 All customer records, tickets, tasks, and policies are authored demo fixtures.
 No customer messages, emails, or external business writes are supported.
@@ -61,6 +61,41 @@ goal correctly. Declared targets cannot be silently dropped; failed write target
 remain unresolved unless a later retry succeeds. Read-only goals, unenumerated
 requirements, and unsupported business actions cannot be certified by this MVP.
 
+M3 retains every ticket discovered open/blocked through search/detail tools and
+every successful write's related ticket. Later narrower searches cannot erase
+them. The verifier reports `discovered_ticket_ids`, `ticket_coverage`, and
+`coverage_complete`. Resolved/escalated coverage requires a matching verified
+persisted status action and audit. Creating a task alone is not escalation.
+The typed `complete_run.ticket_reports` can explain `blocked` or `out_of_scope`
+tickets with a ticket ID and concrete reason. Blockers force partial/blocked
+status; missing reports appear explicitly and cannot silently become success.
+Scope exclusions and blocker explanations are model declarations, not proof of
+arbitrary natural-language scope. Undiscovered tickets are not certified.
+
+Independent demonstrations start with a reset; save/inspect state before another
+reset. Both requests use the same graph/tools, without a configured tool sequence:
+
+```powershell
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes
+& .\.venv\Scripts\python.exe -m ai_employee run "Investigate Acme's recurring integration issue. Review the relevant ticket and company procedure, arrange engineering follow-up, update the issue's status as permitted, and independently verify the persisted outcome. Do not claim the defect itself is fixed." --timeout 600
+& .\.venv\Scripts\python.exe -m ai_employee inspect
+
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes
+& .\.venv\Scripts\python.exe -m ai_employee run "Review Acme's outstanding support issues. Complete whatever actions are permitted by company policy, arrange engineering follow-up where necessary, and report issues that cannot be completed." --max-steps 24 --max-tools 32 --timeout 600
+& .\.venv\Scripts\python.exe -m ai_employee inspect
+```
+
+Actual M3 evidence: the engineering run returned `completed` with two verified
+writes; the combined run returned `partial` with four verified writes and all
+three discovered tickets accounted for. Ticket 3 remained open with an explicit
+missing-information blocker. Both runs recovered from HTTP 429 and tool-generation
+HTTP 400. Neither retrieved a valid policy document: the combined run tried an
+unknown policy ID and continued. The generic policy-reading instruction does
+not guarantee model compliance; successful policy retrieval remains an unmet
+demonstration requirement. No defect repair or full procedural compliance is
+claimed. Sanitized traces and independent snapshots are preserved under ignored
+`logs/m3-engineering-*` and `logs/m3-combined-*`; `progress.md` records details.
+
 Defaults: 16 model steps, 24 tool executions, 180 seconds of elapsed run budget,
 30-second model request timeout, and at most one retry per model step on HTTP 429
 when the longest relevant `Retry-After`/token-reset delay, plus a small buffer,
@@ -81,12 +116,13 @@ honestly as partial at HTTP 429 after changing only the preference. Details are
 in `progress.md`; this is evidence of one run, not a guarantee of future model
 behavior. Multi-ticket and live changed-input demonstrations remain for M3.
 
-The targeted reliability patch's single live run persisted both Acme changes and
+The targeted reliability patch's earlier single live run persisted both Acme changes and
 successfully waited 45.459 seconds on HTTP 429. A subsequent provider rejection
 prevented the typed terminal proposal; the result was correctly `partial`, with
 two verified actions. Subsequent provider-generation recovery is tested offline
-and has not been rerun live under the one-run limit. See `progress.md` for evidence
-and the diagnostic limitation. M3 remains pending review.
+and was subsequently approved after a successful user-run validation. M3's
+engineering demonstration also recovered from both HTTP 429 and tool-generation
+HTTP 400. See `progress.md` for actual run evidence and limitations.
 
 To retain the sanitized trace locally (logs are Git-ignored):
 

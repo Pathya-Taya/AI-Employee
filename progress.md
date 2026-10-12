@@ -1,7 +1,7 @@
 # AI Employee — Implementation Progress
 
-**Current status:** M0/M1 approved; M2 reliability patch tested offline; its one live rerun returned partial with both writes verified. Awaiting review.
-**Current milestone:** Targeted M2 reliability patch only; typed completion has not yet succeeded in a live rerun.
+**Current status:** M0–M2 approved; M2/reliability patch committed. M3 offline tests and two live operation runs verified; successful policy retrieval remains unmet. Awaiting review.
+**Current milestone:** M3 — generalization and multi-operation autonomy only. No M4/M5 work.
 **Time constraint:** Approximately 6–8 hours remained at architecture approval; update time remaining manually as needed.
 
 ## Confirmed setup (from previous development handoff)
@@ -14,14 +14,14 @@
 
 ## Milestone tracking
 - [x] **M0 — Model preflight:** Groq API key loaded securely; ChatGroq returns one valid structured tool call.
-- [x] **M1 — Sandbox/tool layer:** Synthetic SQLite seed/reset, policies, composable tools and offline tests passed. Commit deferred by explicit user instruction.
-- [x] **M2 — Agent MVP:** LangGraph + hosted model dynamically executed persistent changes; trace, independent readback, offline tests and live run passed. No commit per explicit instruction.
-- [ ] **M3 — Multiple operations:** Escalation/task creation and varied requests; generalization test; commit.
+- [x] **M1 — Sandbox/tool layer:** Synthetic SQLite seed/reset, policies, composable tools and offline tests passed; approved/committed (`d09a2ac`).
+- [x] **M2 — Agent MVP:** Approved/committed (`c0e01b0`, reliability `a7009fe`); user reports successful latest live completion/recovery. M3 also independently reproduced 429/400 recovery.
+- [ ] **M3 — Multiple operations:** Implemented and tested: engineering escalation and mixed actions with coverage/blockers. Successful live policy retrieval unmet; awaiting review. No commit this request.
 - [ ] **M4 — Hardening:** Safe error paths, duplicate protection, regression tests; commit. *Optional once time is tight.*
 - [ ] **M5 — Submit:** README, no leaked secrets, clean replay, recorded video, GitHub push, form responses.
 
 ## Verified tests and actual runs
-See verified M0, M1, and M2 runs below. M3–M5 have not been implemented or demonstrated.
+See verified M0–M3 results below. M4/M5 remain unimplemented. Historical M2 patch limitations below describe that earlier run; the user subsequently validated, approved, and committed M2.
 
 ## Known issues / constraints
 - Groq authentication and model tool-call access verified. Account billing tier, remaining quota, and sustained rate limits were not independently inspected.
@@ -31,8 +31,8 @@ See verified M0, M1, and M2 runs below. M3–M5 have not been implemented or dem
 - Demo-video hosting method not chosen; video link is required.
 
 ## Next action
-1. Review the targeted M2 patch, partial live result, independent state evidence, and diagnostic limitation below. No commit/push was made.
-2. Further live completion validation requires a separate request because this patch was limited to one additional live run. M3 remains unstarted pending review.
+1. Review M3 changes, both preserved live traces/snapshots, ticket coverage and the policy-retrieval gap below. No automatic commit/push was made.
+2. Any further live validation needs a separate request: this turn used exactly one engineering and one combined run. Stop before M4/M5.
 
 ### M0 — Provider/model tool-calling preflight — 2026-10-12
 
@@ -310,6 +310,80 @@ Outcome / remaining work:
 - Typed completion, bounded malformed-response recovery, and token-reset-aware retry pass all offline regressions. Actual live 429 wait/recovery and both persistent business actions were demonstrated.
 - **Full live terminal-completion revalidation was not met:** the sole rerun ended `partial` after a provider rejection. This patch is ready for review with that limitation, not reported as a fully successful new end-to-end run.
 - Provider availability/quotas and natural-language target interpretation remain limitations; no arbitrary goal semantics are proven. No policy or service changes to force success, no new unrelated tools, no M3/M4, no commit/push. Stop for review; further live validation and M3 need a separate request.
+
+### M3 — Generalization and multi-operation autonomy — 2026-10-12
+
+Starting evidence / scope:
+- Read `AGENTS.md`, the approved plan and progress, then inspected graph/state/message handling, existing tool schemas/service/store/policies, tests and Git status. Starting tree clean; latest committed checkpoint `a7009fe` (`fix: improve agent completion and rate limit recovery`). User reports M2 and its patch approved after a successful manual live run; this is user-provided evidence, separate from this turn's two recorded runs.
+- Reused the ten business tools and existing single-agent graph. No provider/model/dependency change, new business operation, schema/fixture/policy change, new domain, extra evaluator, UI, email, billing, browser automation, M4/M5 or commit.
+
+Implemented:
+- Monotonic graph-state tracking of tickets returned open/blocked by successful search/detail reads and related tickets of successful business writes. Narrower later searches cannot erase earlier discoveries. Existing terminal historical tickets do not automatically require new action.
+- Optional typed `complete_run.ticket_reports`: ticket ID, disposition (`resolved`, `escalated`, `blocked`, `out_of_scope`), concrete bounded reason. Reject duplicate IDs/empty reasons. No new business tool; this extends the existing completion signal only.
+- Fresh SQLite verification now includes discovered ticket IDs, per-ticket coverage, persisted status/link, and coverage-complete/blocker flags. Resolved/escalated coverage requires matching verified status-action/audit evidence. A created task by itself cannot count as escalation. Missing/unsupported reports remain visible, prevent completion and may feed back to the same model within existing budgets.
+- Explicit blocked reports prevent `completed` even without free-form blockers. Final reports retain unmet discovered tickets on partial/failure paths. Model-declared blockers and scope exclusions are explicitly labeled; no claim to prove arbitrary natural-language scope. No code chooses a company workflow or model tool sequence.
+- After the standalone model skipped policy reads, strengthened the generic instruction to read relevant policies before writes. The combined run still did not retrieve a valid policy: this prompt is guidance, not an enforced authorization rule or a demonstrated fix. M1 backend safeguards remain unchanged.
+
+Files created:
+- `tests/test_m3.py` — 17 deterministic cases for real SQLite/tool composition with a scripted fake model, including changed customer/ticket IDs (synthetic Nova ticket 9 in an isolated test DB), linked task/escalation/read-back, safe precondition recovery and idempotent task retry, mixed operations, omitted discovery targets, coverage feedback, explicit scope exclusions, unsupported/insufficient-information reports, fabricated coverage, conflicting/empty reports and stale/broken links.
+
+Files modified:
+- `src/ai_employee/agent.py` — completion report schema, discovery state, verifier integration, explicit final blockers and generic policy guidance.
+- `src/ai_employee/verify.py` — typed ticket reports and independent coverage checks in the existing verifier.
+- `tests/test_agent.py` — one legacy partial-blocker assertion now expects the original blocker plus the newly exposed unclosed preference ticket.
+- `README.md` — commands, coverage semantics and actual demonstrations/limitations.
+- `progress.md` — this report and current milestone status.
+- Ignored artifacts: `logs/m3-engineering-reset.json`, `m3-engineering-initial-state.json`, `m3-engineering-live.jsonl`, `m3-engineering-final-state.json`, corresponding four `m3-combined-*` files, mutable `data/sandbox.db` and existing test artifacts. Earlier logs preserved; `.env` unchanged.
+
+Dependencies:
+- **None added/installed/upgraded.** Existing Python 3.11 environment, pinned LangGraph 1.2.14, langchain-groq 1.1.3, langchain-core 1.6.9, Pydantic 2.14.1, python-dotenv 1.2.4 and pytest 9.1.1 retained. `pip check` passed.
+
+Exact regression/check commands (PowerShell):
+```powershell
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pip check
+& .\.venv\Scripts\python.exe -m py_compile scripts/preflight_groq.py src/ai_employee/agent.py src/ai_employee/verify.py
+git diff --check
+git status --short
+git diff --cached --name-only
+git check-ignore .env .venv/Scripts/python.exe logs/m3-engineering-live.jsonl logs/m3-combined-live.jsonl data/sandbox.db .pytest_tmp/sample.db
+git ls-files .env
+```
+- First suite: **132 passed, 1 failed (7.66s), exit 1**. `test_explicit_blocker_with_verified_subset_is_partial` expected only `Ticket 3 needs information`; coverage correctly also reported ticket 1 still open after preference-only execution. Updated the assertion to retain both reports rather than hiding the uncovered ticket.
+- Next full suite: **133 passed / 0 failed (7.23s), exit 0**. Final suite after generic policy prompt refinement: **133 passed / 0 failed (6.69s), exit 0**. Includes all M0 non-network checks, M1 service tests and M2 completion/429/400 regressions. Changed-record fake-model evidence is offline only.
+- Dependency and syntax checks exited 0; `No broken requirements found`. Whitespace checks passed (informational LF/CRLF notices only). Git staged-name check empty; `.env` untracked/ignored; logs, DB, venv and test artifacts ignored. Existing interpreter execution used the approved outside-sandbox route. No hosted M0 preflight or extra live scenarios.
+
+Priority 1 — exactly one live engineering demonstration:
+```powershell
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes | Tee-Object -FilePath logs/m3-engineering-reset.json
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m3-engineering-initial-state.json
+& .\.venv\Scripts\python.exe -u -m ai_employee run "Investigate Acme's recurring integration issue. Review the relevant ticket and company procedure, arrange engineering follow-up, update the issue's status as permitted, and independently verify the persisted outcome. Do not claim the defect itself is fixed." --timeout 600 | Tee-Object -FilePath logs/m3-engineering-live.jsonl
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m3-engineering-final-state.json
+```
+- Reset, initial/final inspection and live command exited **0**. Actual final **completed**, **7 model steps**, **6 tool executions including completion**, **2 verified actions**, `all_verified=true`, `coverage_complete=true`; approximately **11:36:51–11:37:50 UTC** (17:06:51–17:07:50 IST).
+- Model-selected sequence: `search_customers(query="Acme")` → `search_tickets(customer_id=1, query="integration", status="open")` → `get_ticket(ticket_id=2)` → `create_task(ticket_id=2, team="engineering", title="Investigate recurring integration failures for Acme", description="Synthetic inventory sync fails every morning. Need root cause analysis.")` → `update_ticket(ticket_id=2, status="escalated", linked_task_id=2, reason="Engineering task created for investigation")` → `complete_run` proposing the linked task and escalated-ticket postconditions. IDs came from discovery/receipts; no manual or hardcoded business calls were substituted.
+- Fresh initial state: ticket 2 open/unlinked, only seeded task 1. Final independent process confirmed **new task 2**, `ticket_id=2`, `team=engineering`, `status=open`; ticket 2 **escalated**, `linked_task_id=2`. Creation audit **3**, escalation audit **4**; backend receipt `prerequisite_verified=true`. Completion snapshot independently verified both actions, two declared requirements and ticket-2 coverage. Four customers/eight tickets/two tasks/four audits; preferences and other tickets unchanged. Follow-up arranged; defect not repaired/resolved.
+- Actual token quota **8000**; `Retry-After=12`, token reset `52.8s`: waited **53.05 seconds**, then succeeded. Subsequent HTTP **400**, `tool_use_failed`: one bounded format correction produced valid `complete_run` and verified completion. SDK/graph retry limits unchanged.
+- **Procedural gap:** model did not select `list_policies`, `read_policy`, or `get_task`; it used ticket context and persisted creation/transition receipts. The completion verifier independently re-read task/link state, and separate CLI inspection confirmed it. Do not claim model-selected task inspection or policy consultation. Operation/escalation verification succeeded, but the explicit policy-retrieval portion of Priority 1 was not demonstrated.
+
+Priority 2 — exactly one combined live demonstration, after successful persisted engineering operation:
+```powershell
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes | Tee-Object -FilePath logs/m3-combined-reset.json
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m3-combined-initial-state.json
+& .\.venv\Scripts\python.exe -u -m ai_employee run "Review Acme's outstanding support issues. Complete whatever actions are permitted by company policy, arrange engineering follow-up where necessary, and report issues that cannot be completed." --max-steps 24 --max-tools 32 --timeout 600 | Tee-Object -FilePath logs/m3-combined-live.jsonl
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m3-combined-final-state.json
+```
+- Fresh reset/initial/final inspections exited **0**. Live command exited **1**, intentionally because final status **partial**: **9 model steps**, **8 tool executions including one rejected policy lookup and completion**, **4 verified actions**, `coverage_complete=true`, `coverage_has_blockers=true`, `all_verified=false`. Approximately **11:40:33–11:42:30 UTC** (17:10:33–17:12:30 IST). No whole-goal success claimed.
+- Model-selected sequence: `search_customers(query="Acme")` → `search_tickets(customer_id=1, status="open")` (tickets 1/2/3) → `update_customer_preferences(customer_id=1, marketing_emails_enabled=false, related_ticket_id=1, reason="Customer requested to stop promotional emails")` → `read_policy(policy_id="preference_update")` (**not_found**) → `update_ticket(ticket_id=1, status="resolved", linked_task_id=null, reason="Preference updated per request")` → `create_task(ticket_id=2, team="engineering", title="Integration failures investigation", description="Recurring integration failures need investigation and fix.")` → `update_ticket(ticket_id=2, status="escalated", linked_task_id=2, reason="Engineering task created for integration failures")` → `complete_run(status="partial", ticket_reports=[{ticket_id:3, disposition:"blocked", reason:"Ticket lacks sufficient information to determine required action."}])` with customer/ticket postconditions.
+- Independent persisted evidence: Acme preference **true → false**, audit **3**; ticket 1 **open → resolved**, audit **4** after unchanged audited-preference precondition; task **2** linked to ticket **2**, creation audit **5**; ticket 2 **open → escalated**, audit **6** after linked-task precondition. Separate final process confirms these changes and real task/team/status. No duplicates: two total tasks, six audits; other customers/tickets unchanged.
+- Ticket 3 stayed **open**, unlinked and unchanged. Its completion disposition is **blocked work**, not a persisted `blocked` status mutation. Model explicitly reported insufficient information; coverage independently observed open state and retained ID 3. No fabricated intent, closure, task or reply. All four write actions and three declared postcondition objects verified; discovered IDs **[1,2,3]**, dispositions **resolved/escalated/blocked**. Explicit blocker appears in final output even though the proposal's free-form blockers list was empty.
+- HTTP 429 waits **55.974 seconds** (`Retry-After=14`, token reset `55.724s`) and **52.765 seconds** (`Retry-After=14`, token reset `52.515s`) both recovered. One HTTP **400** tool-generation rejection then recovered via the existing single correction. No extra live run was made.
+- **Policy limitation:** `preference_update` was an invented policy ID, safely rejected. The model continued without listing policies or reading a valid document, despite stronger generic guidance; it also wrote before attempting the read. Actual backend safeguards enforced admissible actions, but successful policy discovery/consultation is not established. No full procedural compliance claimed.
+
+Priority 3 / assessment:
+- Deterministic coverage was demonstrated live: all three discovered in-scope tickets stayed in the final report; ticket 3 was explicitly blocked, not omitted. Offline tests reject dropping targets, fabricated terminal states and broken linkage. Blocker explanations and scope exclusions remain model declarations; narrow searches can still miss undiscovered targets, and arbitrary goal semantics are not proven.
+- Different tool combinations and real engineering/preference/status operations were demonstrated with the same graph/capabilities and no request-specific business workflow code. A generic policy-guidance refinement occurred between demonstrations; no provider/tool/service/fixture change. Changed customer/ticket IDs were tested offline; no live changed-customer scenario was added under the two-run cap.
+- **Execution/composition/coverage verified; full requested policy-retrieval demonstration remains unmet.** M3 is presented for review with this gap, rather than claiming every requirement passed. Further live validation requires a new request. Code/tests are ready for review; do not proceed to M4/M5 or commit automatically.
 
 ## Milestone update template
 Copy this section after each milestone:

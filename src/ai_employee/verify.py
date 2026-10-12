@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .contracts import EntityId, Input
+from .contracts import EntityId, Input, Text
 from .store import Store
 
 WRITES = {"update_customer_preferences", "update_ticket", "create_task"}
@@ -34,13 +34,22 @@ class Requirement(Input):
         return self
 
 
+class TicketReport(Input):
+    """Public accounting for a discovered ticket; reasons are model declarations."""
+
+    ticket_id: EntityId
+    disposition: Literal["resolved", "escalated", "blocked", "out_of_scope"]
+    reason: Text = Field(max_length=400)
+
+
 def action_key(action):
     name, args = action["tool"], action["arguments"]
     return (name, args.get("customer_id") if name == "update_customer_preferences" else args.get("ticket_id"),
             args.get("related_ticket_id") if name == "update_customer_preferences" else None)
 
 
-def verify_outcomes(store: Store, actions: list[dict], requirements: list[dict]) -> dict:
+def verify_outcomes(store: Store, actions: list[dict], requirements: list[dict], *,
+                    discovered_ticket_ids: list[int] | None = None, ticket_reports: list[dict] | None = None) -> dict:
     """Re-read source-of-truth state; receipt success flags are never proof."""
     snapshot = store.snapshot()  # New SQLite connection; no writes or model inference.
     records = {kind: {row["id"]: row for row in snapshot[table]} for kind, table in TABLES.items()}
@@ -103,7 +112,35 @@ def verify_outcomes(store: Store, actions: list[dict], requirements: list[dict])
         checks.append({**requirement.model_dump(), "verified": verified, "observed": observed,
                        "evidence_source": "independent SQLite snapshot at completion",
                        "failure_reason": None if verified else "Postcondition lacks a matching persisted action or state."})
+    reports = {item.ticket_id: item for item in (TicketReport.model_validate(raw) for raw in ticket_reports or [])}
+    coverage = []
+    for ticket_id in sorted(set(discovered_ticket_ids or []) | set(reports)):
+        record = records["ticket"].get(ticket_id)
+        report = reports.get(ticket_id)
+        observed_status = record["status"] if record else None
+        supported = any(item["verified"] and item["operation"] == "update_ticket"
+                        and item["entity_id"] == ticket_id and item["expected"].get("status") == observed_status
+                        for item in evidence)
+        disposition, accounted, reason = "unreported", False, "No verified terminal update or explicit blocker/scope report."
+        if report and report.disposition == "out_of_scope":
+            disposition, accounted, reason = report.disposition, record is not None, report.reason
+        elif report and report.disposition == "blocked" and observed_status in {"open", "blocked"}:
+            disposition, accounted, reason = "blocked", True, report.reason
+        elif supported and observed_status in {"resolved", "escalated"}:
+            disposition, accounted = observed_status, report is None or report.disposition == observed_status
+            reason = report.reason if report else "Terminal update independently verified against persisted state and audit."
+        elif report:
+            reason = "Declared ticket disposition lacks matching persisted terminal action/state."
+        coverage.append({"ticket_id": ticket_id, "disposition": disposition, "accounted": accounted,
+                         "observed_status": observed_status, "linked_task_id": record["linked_task_id"] if record else None,
+                         "reason": reason, "evidence_source": "independent SQLite snapshot at completion",
+                         "scope_note": "Scope exclusions and blocker reasons are model declarations, not semantic proof." if report and report.disposition in {"out_of_scope", "blocked"} else None})
+    coverage_complete = all(item["accounted"] for item in coverage)
+    coverage_has_blockers = any(item["disposition"] == "blocked" for item in coverage)
     unresolved = any(item["expected"].get("status") == "blocked" for item in checks)
     return {"actions": evidence, "requirements": checks,
+            "discovered_ticket_ids": sorted(set(discovered_ticket_ids or [])), "ticket_coverage": coverage,
+            "coverage_complete": coverage_complete, "coverage_has_blockers": coverage_has_blockers,
             "verified_action_count": sum(item["verified"] for item in evidence),
-            "all_verified": bool(evidence and checks) and all(item["verified"] for item in evidence + checks) and not unresolved}
+            "all_verified": bool(evidence and checks) and all(item["verified"] for item in evidence + checks)
+                            and not unresolved and coverage_complete and not coverage_has_blockers}

@@ -137,7 +137,8 @@ def test_explicit_blocker_with_verified_subset_is_partial(service):
         call("update_customer_preferences", PREFERENCE),
         finish(status="partial", blockers=["Ticket 3 needs information"])]))
     assert result["status"] == "partial"
-    assert result["blockers"] == ["Ticket 3 needs information"]
+    assert "Ticket 3 needs information" in result["blockers"]
+    assert any("Ticket 1" in blocker for blocker in result["blockers"])  # Preference changed, ticket still open.
 
 
 def test_completed_proposal_with_blockers_is_not_completed(service):
