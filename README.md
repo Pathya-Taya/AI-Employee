@@ -2,6 +2,7 @@
 
 M0–M3 provide a Python 3.11 Groq preflight, a synthetic SQLite company
 environment, and a single-agent LangGraph CLI that chooses and executes tools.
+A lightweight Streamlit interface makes the same agent easy to demonstrate locally.
 All customer records, tickets, tasks, and policies are authored demo fixtures.
 No customer messages, emails, or external business writes are supported.
 
@@ -22,6 +23,54 @@ if `.env` does not exist, replace the placeholder locally, and never share the k
 ```powershell
 & .\.venv\Scripts\python.exe scripts/preflight_groq.py
 ```
+
+## Local demo interface (PowerShell)
+
+From the repository root, install the existing requirements and launch:
+
+```powershell
+& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Open **http://127.0.0.1:8501** in your local browser. Select one of the three
+example goals or write your own, then click **Run Agent**. The UI calls the same
+`run_agent` entry point as the CLI; there are no configured tool sequences or
+expected outcomes. The page shows actual public tool events progressively,
+provider quota waits, independently verified operations and audits, unresolved
+work, and initial/final SQLite state differences. Tool names, arguments, actual
+observations and raw structured events remain inspectable. A completion proposal
+does not display as completed until the backend returns verified completion.
+
+Use **Reset Sandbox** before an independent demo. You must explicitly confirm
+that previous synthetic demo changes will be erased. Existing state is preserved
+on page load. Run and reset controls are disabled during execution; the shared
+local adapter also rejects overlapping actions across browser sessions. Rerenders
+and example selection never launch a run automatically.
+
+UI runs retain the existing 16-step/24-tool caps and use a 360-second budget to
+allow bounded Groq quota waits. An in-flight call can add up to 30 seconds. A
+background worker and Streamlit [fragments](https://docs.streamlit.io/develop/concepts/architecture/fragments)
+keep the page responsive; all Streamlit rendering stays on its script thread.
+Closing/reloading the tab does not cancel an active worker in the same server.
+Restarting the server loses active in-memory UI state; persisted business changes
+remain in SQLite. Avoid concurrent CLI mutations during a demo.
+
+Download run evidence from the page; sanitized events, final result and snapshots
+are also saved locally under ignored `logs/ui-<run-id>.json`. The UI listens on
+localhost only, has no authentication, and is intended for a local desktop demo.
+No API key is displayed or requested in the UI. It uses the same local `.env`
+setup as the CLI. Stop the server with **Ctrl+C** in its PowerShell window.
+Streamlit is the only new direct dependency (`ui` extra); CLI-only setup remains
+available with `pip install -e .`.
+
+UI validation: **166 offline tests passed**. One real Groq engineering run,
+triggered through the page's controls using Streamlit's official testing harness,
+returned `completed`; separate CLI inspection confirmed the linked task,
+escalation and audit evidence. Local page/health endpoints returned HTTP 200.
+A connected browser was unavailable during development, so desktop visual review
+remains manual. Actual events and final state are in ignored `logs/ui-live-*`;
+`progress.md` records the test commands, tool sequence and provider recovery.
 
 ## Autonomous agent run
 

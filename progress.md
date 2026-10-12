@@ -1,7 +1,7 @@
 # AI Employee — Implementation Progress
 
-**Current status:** M0–M3 core approved; M3 committed at `af54fe1`. Targeted policy-discovery patch: 140 offline tests passed; one live run retrieved an applicable policy and completed independently verified engineering escalation. Patch awaiting review; not committed.
-**Current milestone:** M3 — targeted generic policy-discovery reliability improvement only. No M4/M5 work.
+**Current status:** M0–M3 and policy-discovery patch approved/committed (latest `cbe15d6`); user independently confirmed engineering persistence. Minimal Streamlit UI implemented: 166 offline tests passed, localhost page/health return 200, one real UI-button/harness run completed with independent SQLite confirmation. UI awaiting review; not committed.
+**Current milestone:** Explicitly requested minimal local Streamlit demonstration UI only. Core graph/service/CLI unchanged; no M4/M5 submission or new business work.
 **Time constraint:** Approximately 6–8 hours remained at architecture approval; update time remaining manually as needed.
 
 ## Confirmed setup (from previous development handoff)
@@ -16,7 +16,8 @@
 - [x] **M0 — Model preflight:** Groq API key loaded securely; ChatGroq returns one valid structured tool call.
 - [x] **M1 — Sandbox/tool layer:** Synthetic SQLite seed/reset, policies, composable tools and offline tests passed; approved/committed (`d09a2ac`).
 - [x] **M2 — Agent MVP:** Approved/committed (`c0e01b0`, reliability `a7009fe`); user reports successful latest live completion/recovery. M3 also independently reproduced 429/400 recovery.
-- [x] **M3 — Multiple operations:** Core autonomy/composition/coverage/verification approved and committed (`af54fe1`). Policy-discovery follow-up retrieved a valid applicable document live; patch awaiting review. No automatic commit.
+- [x] **M3 — Multiple operations:** Approved/committed (`af54fe1`, policy discovery `cbe15d6`); user independently validated engineering persistence.
+- [x] **Local Streamlit demo UI:** Implemented/tested against existing agent; one real UI-triggered engineering run verified. Awaiting review; browser visual inspection remains manual.
 - [ ] **M4 — Hardening:** Safe error paths, duplicate protection, regression tests; commit. *Optional once time is tight.*
 - [ ] **M5 — Submit:** README, no leaked secrets, clean replay, recorded video, GitHub push, form responses.
 
@@ -31,8 +32,8 @@ See verified M0–M3 results below. M4/M5 remain unimplemented. Historical M2 pa
 - Demo-video hosting method not chosen; video link is required.
 
 ## Next action
-1. Review the targeted policy-discovery patch and `logs/m3-policy-discovery-*` trace/snapshots. No automatic commit/push was made.
-2. This follow-up used exactly one live test. Policy relevance and full procedural compliance remain model-dependent; see limitations below. Stop before M4/M5 pending a separate request.
+1. Review the UI at `http://127.0.0.1:8501` and evidence in `logs/ui-live-validation.json` / `logs/ui-live-independent-state.json`. Browser connection was unavailable to the coding session; page controls/results were exercised using Streamlit's official harness and the local HTTP page was checked.
+2. Exactly one UI-triggered live run was used. No automatic commit/push/deployment. Reset explicitly before another independent demo. Stop for review before final submission work.
 
 ### M0 — Provider/model tool-calling preflight — 2026-10-12
 
@@ -445,6 +446,102 @@ Outcome / limitations / next action:
 - This is one successful retrieval, not a guarantee of future relevance or full procedural compliance. The model retrieved `ticket_lifecycle`, not the separate `escalation` document, and did not call `get_task`; task/link persistence was independently checked by receipts, completion snapshot and later inspection. No claim that every applicable document or procedural step was model-selected.
 - No deterministic policy-read authorization gate or semantic policy evaluator was added. Rate quotas and tool-generation errors remain provider limitations, with existing bounded safe recovery. Arbitrary natural-language completeness remains outside verification scope.
 - Stop for review. Do not begin M4/M5 or run another live test without a separate request.
+
+### Minimal Streamlit demonstration UI — 2026-10-12
+
+Scope / starting evidence:
+- User explicitly requested a lightweight browser UI after approval of M0–M3 and a successful independent manual engineering test. This supersedes the earlier optional-UI deferral for this request only. Read all three project documents and inspected CLI, graph/callback/message handling, service/store, trace sanitizer, verification shape, policies and regression tests.
+- Starting tree clean; approved latest Git checkpoint `cbe15d6`. Added presentation/adapter code only: existing `agent.py`, `config.py`, CLI, service, tools, business rules, policies, verification and LangGraph architecture are unchanged. No new business features, FastAPI/React, public deployment or automated commit.
+- Completed within the requested 45–60-minute maximum. No additional hosted scenario or provider/prompt-tuning cycle.
+
+Implemented:
+- Streamlit page with product/synthetic-sandbox introduction, free-text goal, Run Agent button, and three selectable Acme example goals. Examples contain natural-language requests only, no IDs, sequences or expected result data.
+- Readable actual-event timeline: model-selected tool names/arguments, paired observations and full returned results, policy document retrieval, completion proposal versus verification, quota-wait notices and safe recovery/limit events. Raw sanitized JSON remains expandable; final evidence is downloadable.
+- Final completed/partial/blocked/failed display, verified-operation/audit table, reported blockers and discovered-ticket coverage. Snapshot differences separately show observed customer/ticket/task changes; initial/final full records are inspectable. Differences themselves are not claimed as verified business completion.
+- Thin background worker calls existing `run_agent` with its real event callback; never calls Streamlit from the worker. Streamlit fragments refresh the running panel every second. Shared cached local controller survives rerenders and rejects overlapping runs/reset, including across browser sessions in the same server. Choosing an example or rerendering never starts a run.
+- Strict confirmed Reset Sandbox uses existing guarded `Store.reset`, clears prior displayed run only after success, and warns that prior synthetic changes/tasks/audits are erased. Page load preserves existing DB; only a new DB is initialized/seeded automatically.
+- UI-specific 360-second run budget accommodates bounded hosted quota waits; existing 16-model-step/24-tool caps, 30-second in-flight timeout and M2 retry/correction logic remain unchanged. Unexpected adapter errors discard raw exception text; no unsupported completion is shown if backend verification or final state access fails.
+- Sanitized local `logs/ui-<run-id>.json` evidence captures only actual public events, final result and fresh snapshots. Localhost binding and disabled Streamlit usage telemetry in configuration. Existing `.env` loading/ignore rules retained; no credential or hidden model reasoning displayed or saved.
+
+Files created:
+- `streamlit_app.py` — small launch entry point.
+- `.streamlit/config.toml` — light desktop theme, localhost-only address, telemetry disabled.
+- `src/ai_employee/ui.py` — Streamlit rendering and controls.
+- `src/ai_employee/ui_adapter.py` — worker/controller, public-event labels and generic snapshot differences.
+- `tests/test_ui_adapter.py`, `tests/test_ui_page.py` — 26 additional offline cases. Real SQLite and graph/fake-model routing, accurate event transformations, redaction, confirmed reset, duplicate/overlap prevention, snapshot comparisons, safe errors/unsupported completion/final-read failure, real Streamlit cache/rerender behavior, page loading, preset selection, final display and quota-wait controls.
+
+Files modified:
+- `pyproject.toml` — optional pinned `ui` extra; core dependency pins unchanged.
+- `requirements.txt` — local demo/test setup installs `[test,ui]`.
+- `README.md` — exact PowerShell launch command, UI behavior and local limitations.
+- `progress.md` — actual evidence/current status.
+- Ignored artifacts: `logs/validate_ui_live.py` (one-run validation driver, no fake model/tools), `logs/ui-live-console.jsonl`, `ui-live-before-reset-state.json`, `ui-live-initial-state.json`, `ui-live-validation.json`, `ui-live-independent-state.json`, `ui-304d2c709d00.json`, mutable `data/sandbox.db` and existing caches. Earlier demo evidence retained. `.env` untouched/untracked/ignored.
+
+Dependencies / setup:
+- Added only direct UI dependency **streamlit==1.65.0** in the optional extra, installed in existing Python 3.11.9 `.venv`.
+- Its required transitive UI packages include pandas **3.0.6**, PyArrow **25.0.1**, Altair **6.3.0**, NumPy **2.4.6**, and Streamlit's rendering/server dependencies. No custom web/API framework or server service was introduced.
+- Verified retained core versions: LangGraph **1.2.14**, langchain-groq **1.1.3**, langchain-core **1.6.9**, groq **0.37.1**, Pydantic **2.14.1**, pytest **9.1.1**. `pip check`: no broken requirements.
+- Initial installation failed while downloading metadata from `files.pythonhosted.org` with `ReadTimeoutError`, exit 1. Retried the same package setup with a 60-second download timeout; succeeded, exit 0. No reinstall/recreation of Python or venv.
+
+Exact commands and actual offline outcomes (PowerShell):
+```powershell
+& .\.venv\Scripts\python.exe -m pip index versions streamlit
+& .\.venv\Scripts\python.exe -m pip install -e '.[test,ui]'
+& .\.venv\Scripts\python.exe -m pip install -e '.[test,ui]' --timeout 60 -q
+& .\.venv\Scripts\python.exe -m pytest -q tests/test_ui_adapter.py --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pytest -q tests/test_ui_page.py --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pip check
+& .\.venv\Scripts\python.exe -m pip show streamlit
+& .\.venv\Scripts\python.exe -m py_compile streamlit_app.py src/ai_employee/ui.py src/ai_employee/ui_adapter.py
+& .\.venv\Scripts\python.exe -m ai_employee --help
+git diff --check
+git status --short
+git diff --cached --name-only
+git diff -- src/ai_employee/agent.py src/ai_employee/__main__.py src/ai_employee/service.py src/ai_employee/verify.py
+git check-ignore .env .venv/Scripts/python.exe logs/ui-live-validation.json logs/validate_ui_live.py data/sandbox.db .pytest_tmp/sample.db
+git ls-files .env
+```
+- Adapter suite: **21 passed / 0 failed (1.46s)**.
+- First page suite: **1 passed, 1 failed (41.97s)**. First dataframe/Arrow startup exceeded the harness's 10-second timeout; the other reset test passed. Increased the harness timeout to 30 seconds for Windows cold imports; next expanded page suite **4 passed / 0 failed (6.19s)**.
+- Complete suite then **165 passed / 0 failed (11.17s)**. Added a focused real-cache/rerender regression; final complete suite **166 passed / 0 failed (12.26s), exit 0**, before the live test. Includes every M0 non-network/M1/M2/M3 regression. No Groq request occurs in these tests.
+- Dependency, syntax, whitespace and artifact/secret checks passed; staged-name list empty. Core source diff above empty. Existing approved interpreter execution outside the restricted sandbox used. LF/CRLF notices informational only.
+
+Launch / page verification:
+```powershell
+# Normal documented launch, from repository root:
+& .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+
+# Actual launch used for validation (same values as local config):
+& .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8501/_stcore/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8501/
+```
+- Server started at **http://127.0.0.1:8501**. Health **200 / `ok`** and page **200 / HTML received**. Server left running locally for user review.
+- Browser capability inventory contained no browsers/apps, and creating the in-app browser returned `Browser is not available: iab`. No native visual/browser interaction is claimed. Used Streamlit's official [AppTest harness](https://docs.streamlit.io/develop/concepts/app-testing/get-started) to render and exercise the actual page controls and inspect status/errors; fragment behavior follows its [official API](https://docs.streamlit.io/develop/concepts/architecture/fragments). Manual desktop visual review remains at the URL above.
+
+Exactly one actual Groq run through the UI controls after offline checks passed:
+```powershell
+& .\.venv\Scripts\python.exe -u logs/validate_ui_live.py | Tee-Object -FilePath logs/ui-live-console.jsonl
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/ui-live-independent-state.json
+```
+- The driver rendered `streamlit_app.py`, checked the actual reset confirmation checkbox, clicked Reset Sandbox, selected **Acme engineering escalation**, and clicked the actual **Run Agent** button. It observed the real cached controller without substituting a model, graph or business tool. No direct business-action calls or fabricated agent events.
+- Driver exited **0**, final UI render errors **0**, status label **Completed · persisted outcomes verified**, cached job unchanged through rerenders. Run ID **304d2c709d00**, **54.4 seconds**, **7 model steps**, **6 tool executions including completion**, **2 verified operations**, `all_verified=true`, `coverage_complete=true`, no blockers. Approximately **14:05:13–14:06:07 UTC** (19:35:13–19:36:07 IST).
+- Actual model-selected sequence:
+  1. `search_customers({"query":"Acme"})` — discovered customer 1.
+  2. `search_tickets({"customer_id":1,"query":"integration","status":"open"})` — discovered open/unlinked engineering ticket 2.
+  3. `read_policy({"policy_id":"ticket_lifecycle"})` — valid actual Markdown document retrieved before writes, `ok=true`; full result preserved in public observations.
+  4. `create_task({"description":"Investigate recurring integration failures for Acme synthetic inventory sync.","team":"engineering","ticket_id":2,"title":"Acme integration issue follow-up"})` — persisted/linked task 2, audit 3, receipt read-back verified.
+  5. `update_ticket({"linked_task_id":2,"reason":"Engineering task created per ticket lifecycle policy","status":"escalated","ticket_id":2})` — guarded transition persisted, audit 4, prerequisite verified.
+  6. `complete_run` — `completed`, task team/ticket and escalated-ticket/link requirements, no blockers; fresh core completion snapshot independently verified both actions/audits, requirements and discovered ticket 2.
+- Actual HTTP **429** recovered after **48.167s** (`Retry-After=9`, token reset `47.917s`, limit **8000**, remaining tokens **1611**). One HTTP **400** `tool_use_failed` recovered through the existing single correction. UI quota-wait text/disabled controls are offline tested; actual wait/recovery events are preserved. No extra live invocation or retry logic change.
+- Fresh adapter snapshot and later independent CLI process matched exactly. Ticket 2 **open → escalated**, `linked_task_id=2`; task 2 persisted `ticket_id=2`, `team=engineering`, `status=open`; audits **3/4**. Four customers/eight tickets/two tasks/four audits. Initial/final comparisons confirm all customers and other tickets unchanged; Acme marketing preference stays true. The DB is left in this demonstrated engineering state.
+
+Limitations / next action:
+- UI controls and actual backend live execution were verified through the official harness; a connected real browser was unavailable, so native visual layout and browser-timer behavior were not directly observed. Open **http://127.0.0.1:8501** for manual desktop review. No fake screenshot/visual verification is claimed.
+- Local desktop UI only; no authentication, deployment, durable worker/checkpoint or cancellation/resume feature. Reload keeps the same in-process job; server restart can interrupt execution, while already committed SQLite changes remain. Don't mutate the same DB concurrently through the CLI or a second server process.
+- Only engineering was run live under the one-run cap. Other example controls and partial/blocked/failure handling are offline validated, not claimed as new live scenarios. The model read ticket lifecycle rather than every applicable policy; full procedural compliance/arbitrary natural-language coverage remain existing limitations.
+- Ready for review with the above validation distinction. No automatic commit/push or final-submission work; stop here.
 
 ## Milestone update template
 Copy this section after each milestone:
