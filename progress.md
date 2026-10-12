@@ -1,7 +1,7 @@
 # AI Employee — Implementation Progress
 
-**Current status:** M0/M1 approved; M2 tested offline and live, awaiting user review.
-**Current milestone:** M2 — single-agent LangGraph MVP verified.
+**Current status:** M0/M1 approved; M2 reliability patch tested offline; its one live rerun returned partial with both writes verified. Awaiting review.
+**Current milestone:** Targeted M2 reliability patch only; typed completion has not yet succeeded in a live rerun.
 **Time constraint:** Approximately 6–8 hours remained at architecture approval; update time remaining manually as needed.
 
 ## Confirmed setup (from previous development handoff)
@@ -31,8 +31,8 @@ See verified M0, M1, and M2 runs below. M3–M5 have not been implemented or dem
 - Demo-video hosting method not chosen; video link is required.
 
 ## Next action
-1. Review M2 changes, actual live trace, and independently inspected state below. Code is ready to commit only on explicit request; no commit/push was made.
-2. Authorize M3 separately after review. Do not start multi-ticket/live generalization demonstrations or M4 hardening during this milestone.
+1. Review the targeted M2 patch, partial live result, independent state evidence, and diagnostic limitation below. No commit/push was made.
+2. Further live completion validation requires a separate request because this patch was limited to one additional live run. M3 remains unstarted pending review.
 
 ### M0 — Provider/model tool-calling preflight — 2026-10-12
 
@@ -248,6 +248,68 @@ Remaining limitations / next milestone:
 - Public JSON compliance and quota availability remain model/provider dependent. Small rate-limit retry is bounded; longer/daily quotas fail honestly. Account billing/free-tier status remains uninspected.
 - No persistent checkpoints, approval/resume system, web UI, new business tools, multi-agent graph, or M4 hardening work.
 - Next: stop for user review before M3. Code ready to commit only upon explicit request; **no automatic commit**.
+
+### M2 — Targeted completion/rate-limit reliability patch — 2026-10-12
+
+Trigger and scope:
+- User manually observed three invalid text completion responses followed by HTTP 429. A roughly 47-second token reset was ignored in favor of a one-second retry.
+- Read the three project documents and inspected the graph, ChatGroq configuration, service/tool contracts, tests, installed message/tool binding and SDK retry handling. Business policies, fixtures, tools, service guards, verifier, dependencies, and architecture were preserved. No M3/M4 implementation.
+
+Implemented:
+- Added the strictly validated `complete_run` control tool, with typed final status, public action, requirements, optional short plan and blockers. It is bound alongside the existing ten business tools with `tool_choice="required"`; it performs no company write. It must be called alone. Mixed completion/business batches are rejected without performing any writes.
+- Terminal free-form/JSON text cannot claim completion. Optional public JSON alongside valid business calls remains supported, and empty/non-JSON content does not invalidate native tool calls. AIMessage/ToolMessage call-ID pairing is retained; reasoning and raw response metadata remain discarded.
+- One format correction per run; a second invalid response or completion signal halts safely. Malformed responses route directly to a bounded correction without redundant verification feedback. Independent verification still runs on termination and checks real SQLite records/audits; verified effects survive failures as `partial`.
+- HTTP 429 waits use the longest valid Retry-After (numeric, HTTP date, or milliseconds), token-reset duration, and exhausted request-reset duration. Groq durations such as `47s` and `1m2.5s` are parsed. Add a 0.25-second buffer; wait no more than 60 seconds and only when a full 30-second model timeout also fits the remaining elapsed budget. Recheck the deadline after waiting; at most one 429 retry per model step. No short fallback retry when headers are unusable.
+- After the live rejection below, added safe HTTP status/allowlisted error-code diagnostics and one bounded correction for HTTP 400 tool-generation rejection (`tool_use_failed` or a failed-generation marker). Provider messages/failed generations are never stored, printed, or reconstructed as tool calls. Unrelated request failures are not retried. This final recovery addition is offline tested only. Groq documents these tool-generation/required-tool errors in its [official tool-use documentation](https://console.groq.com/docs/tool-use/local-tool-calling).
+
+Files modified (no new source files):
+- `src/ai_employee/agent.py` — typed control signal, bounded correction/routing, reset-header retry logic, safe provider diagnostics.
+- `src/ai_employee/config.py` — shared 30-second timeout constant; same model/key loading/SDK retry settings.
+- `tests/test_agent.py` — migrate final-response fixtures to native completion calls; 27 additional regression cases, including completion recovery, malformed/empty response limits, valid tool calls without public JSON, batch safety, quota waits/budgets, repeated errors, and provider-generation rejection.
+- `README.md` — actual completion/retry behavior and partial live outcome.
+- `progress.md` — this verified patch report.
+- Ignored local artifacts: `logs/m2-reliability-live.jsonl`, `logs/m2-reliability-final-state.json`, reset/mutated `data/sandbox.db` and test caches. Earlier logs retained; `.env` unchanged.
+
+Dependencies:
+- None installed, added, or upgraded. Verified existing Python **3.11.9**, `langgraph==1.2.14`, `langchain-groq==1.1.3`, `langchain-core==1.6.9`, `groq==0.37.1`, `pydantic==2.14.1`, `python-dotenv==1.2.4`, `pytest==9.1.1` using `importlib.metadata` locally.
+
+Commands/tests and actual results (PowerShell):
+```powershell
+& .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp
+& .\.venv\Scripts\python.exe -m pip check
+& .\.venv\Scripts\python.exe -m py_compile scripts/preflight_groq.py src/ai_employee/agent.py src/ai_employee/config.py
+git diff --check
+git status --short
+git diff --cached --name-only
+git check-ignore .env .venv/Scripts/python.exe logs/m2-reliability-live.jsonl data/sandbox.db .pytest_tmp/sample.db
+git ls-files .env
+```
+- Successive full offline suites as regressions were added: **111 passed (11.10s)**, **112 passed (7.79s)**, **115 passed (7.50s)**, final **116 passed / 0 failed (8.68s), exit 0**. Includes unchanged M0 non-network checks and all M1 tests. No failing test run in this patch.
+- Dependency check: exit 0, `No broken requirements found`. Syntax check: exit 0. Real ChatGroq binding/schema construction tested without invocation. No M0 hosted preflight or other live scenario run.
+- Git whitespace/status/ignore checks passed (informational LF/CRLF notices only). No staged files; `.env` untracked; DB/logs/venv/test artifacts ignored. Interpreter execution used the existing approved outside-sandbox route; no reinstall.
+
+Exactly one additional live M2 run (after >5 minutes of offline work, beyond the reported 47-second reset):
+```powershell
+& .\.venv\Scripts\python.exe -m ai_employee reset --yes
+& .\.venv\Scripts\python.exe -u -m ai_employee run "Find Acme's open request to stop promotional emails, make the permitted preference change, resolve that ticket only after verification, and independently verify the outcome." --timeout 240 | Tee-Object -FilePath logs/m2-reliability-live.jsonl
+& .\.venv\Scripts\python.exe -m ai_employee inspect | Tee-Object -FilePath logs/m2-reliability-final-state.json
+```
+- Reset and independent inspection exited 0. Hosted run exited **1**, final **partial**, **6 model steps**, **5 executed tools**, **2 independently verified actions**, `all_verified=false`. Trace ran approximately **10:56:59–10:57:48 UTC** (16:26:59–16:27:48 IST).
+- Actual model-selected sequence, without hardcoded/manual business substitution:
+  1. `search_customers({"query":"Acme"})`
+  2. `search_tickets({"customer_id":1,"query":"stop promotional","status":"open"})`
+  3. `get_ticket({"ticket_id":1})`
+  4. `update_customer_preferences({"customer_id":1,"marketing_emails_enabled":false,"reason":"Customer requested to stop promotional emails","related_ticket_id":1})`
+  5. `update_ticket({"linked_task_id":null,"reason":"Preference updated per request","status":"resolved","ticket_id":1})`
+- After the preference write, actual HTTP 429 headers showed `retry-after=2`, token limit **8000**, remaining tokens **1972**, token reset **45.209s**. The patch waited **45.459 seconds**, with **237.3 seconds** remaining, and the next request succeeded. It ignored the longer daily request reset because the request quota was not exhausted. No malformed text correction occurred in this live run.
+- Acme customer 1 changed **true → false**, audit **3**, related ticket 1/value false. Ticket 1 changed **open → resolved**, audit **4**, after unchanged backend prerequisites and receipt read-back succeeded (`prerequisite_verified=true`). Completion-stage fresh snapshot independently verified both actions and audits. The separate later `inspect` process again confirmed false/resolved and audit IDs 3/4. Four customers, eight tickets, one seeded task, four audit events; no unrelated business records changed.
+- The request after ticket resolution failed with the safe message `Groq rejected or failed the request; check provider status/model support.` It did not yield a terminal completion declaration. Requirements remained empty, so the verifier correctly refused whole-goal certification despite both verified writes. No successful `complete_run` call is claimed for this live run.
+- **Diagnostic limitation:** the version used for this sole live run did not retain the rejection's HTTP status/error code, so its precise cause cannot be established from the saved trace. Token headers remained available, but those do not establish the error cause. Safe status/code diagnostics and provider-generation correction were added afterwards and verified offline; their live effectiveness is unverified. No second live run was attempted, respecting the user's limit.
+
+Outcome / remaining work:
+- Typed completion, bounded malformed-response recovery, and token-reset-aware retry pass all offline regressions. Actual live 429 wait/recovery and both persistent business actions were demonstrated.
+- **Full live terminal-completion revalidation was not met:** the sole rerun ended `partial` after a provider rejection. This patch is ready for review with that limitation, not reported as a fully successful new end-to-end run.
+- Provider availability/quotas and natural-language target interpretation remain limitations; no arbitrary goal semantics are proven. No policy or service changes to force success, no new unrelated tools, no M3/M4, no commit/push. Stop for review; further live validation and M3 need a separate request.
 
 ## Milestone update template
 Copy this section after each milestone:

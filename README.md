@@ -36,6 +36,14 @@ Run from the repository root so the agent can load the existing local `.env`:
 The `agent → tools → agent` loop uses Groq `openai/gpt-oss-120b`. The model chooses
 tool calls and their order. A separate `verify` node reads a fresh SQLite snapshot
 and checks actions against records, audit evidence, and enumerated postconditions.
+The model stops by calling the typed `complete_run` signal alone, with its public
+status and explicit requirements. This signal makes no business writes and does
+not prove completion. Tool selection is required; text-only responses cannot
+claim success. One format correction is allowed per run, then a second invalid
+response stops safely. Valid business calls need no accompanying JSON text.
+Provider HTTP 400 tool-generation rejections share this correction budget;
+unrelated request failures stop immediately. Only allowlisted error codes and
+HTTP status are traced, never provider messages or failed generations.
 Missing evidence can return the run to the model for correction. No code contains
 an Acme workflow. All writes pass through the M1 service and its unchanged rules.
 
@@ -55,12 +63,16 @@ requirements, and unsupported business actions cannot be certified by this MVP.
 
 Defaults: 16 model steps, 24 tool executions, 180 seconds of elapsed run budget,
 30-second model request timeout, and at most one retry per model step on HTTP 429
-when `Retry-After` is at most 60 seconds and fits the remaining run budget.
+when the longest relevant `Retry-After`/token-reset delay, plus a small buffer,
+is at most 60 seconds and leaves room for the 30-second request timeout.
+An exhausted request quota also honors its request-reset header. Unusable or
+over-budget resets fail safely; repeated HTTP 429 is never retried in a loop.
+The tool budget includes the completion signal.
 Budgets are checked at node/tool boundaries; an in-flight model request can finish
 after the elapsed budget. There is no broad provider retry loop or checkpointer.
 Use `--max-steps`, `--max-tools`, and `--timeout` to change these bounded limits.
 
-One genuine M2 run on 2026-10-12 completed in seven model steps with four selected
+An earlier genuine M2 run on 2026-10-12 completed in seven model steps with four selected
 tools: `search_customers → search_tickets → update_customer_preferences →
 update_ticket`. It changed Acme's preference to false and resolved ticket 1;
 independent verification checked audit IDs 3 and 4. One short rate-limit retry
@@ -68,6 +80,13 @@ and two public-format corrections occurred. The first hosted attempt stopped
 honestly as partial at HTTP 429 after changing only the preference. Details are
 in `progress.md`; this is evidence of one run, not a guarantee of future model
 behavior. Multi-ticket and live changed-input demonstrations remain for M3.
+
+The targeted reliability patch's single live run persisted both Acme changes and
+successfully waited 45.459 seconds on HTTP 429. A subsequent provider rejection
+prevented the typed terminal proposal; the result was correctly `partial`, with
+two verified actions. Subsequent provider-generation recovery is tested offline
+and has not been rerun live under the one-run limit. See `progress.md` for evidence
+and the diagnostic limitation. M3 remains pending review.
 
 To retain the sanitized trace locally (logs are Git-ignored):
 

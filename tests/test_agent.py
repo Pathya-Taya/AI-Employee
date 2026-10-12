@@ -5,7 +5,7 @@ import json
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
-from ai_employee.agent import run_agent
+from ai_employee.agent import COMPLETION_TOOL, completion_tool, rate_limit_delay, run_agent
 from ai_employee.verify import verify_outcomes
 
 PREFERENCE = {"customer_id": 1, "marketing_emails_enabled": False, "related_ticket_id": 1, "reason": "Recorded request"}
@@ -21,8 +21,9 @@ def call(name, args, *, requirements=None, call_id="call_1"):
 
 
 def finish(requirements=None, status="completed", blockers=None):
-    return AIMessage(content=json.dumps({"plan": ["Verify results"], "action": "Submit outcomes for independent verification",
-                                        "requirements": requirements or REQUIREMENTS, "status": status, "blockers": blockers or []}))
+    return AIMessage(content="", tool_calls=[{"name": COMPLETION_TOOL, "id": "completion_1", "args": {
+        "plan": ["Verify results"], "action": "Submit outcomes for independent verification",
+        "requirements": requirements or REQUIREMENTS, "status": status, "blockers": blockers or []}}])
 
 
 class FakeModel:
@@ -31,8 +32,9 @@ class FakeModel:
         self.histories = []
         self.bound_names = []
 
-    def bind_tools(self, tools):
+    def bind_tools(self, tools, **options):
         self.bound_names = [tool.name for tool in tools]
+        self.binding_options = options
         return self
 
     def invoke(self, messages, config=None):
@@ -55,8 +57,9 @@ def test_real_graph_routes_dynamic_model_calls_through_tools_and_verifier(servic
     events = []
     result = run_agent("Handle the opt-out and close its ticket", service, model=model, emit=events.append)
     assert result["status"] == "completed"
-    assert result["steps"] == 6 and result["tool_calls"] == 5
-    assert len(model.bound_names) == 10
+    assert result["steps"] == 6 and result["tool_calls"] == 6
+    assert len(model.bound_names) == 11 and COMPLETION_TOOL in model.bound_names
+    assert model.binding_options["tool_choice"] == "required"
     assert store.read("customers", 1)["marketing_emails_enabled"] is False
     assert store.read("tickets", 1)["status"] == "resolved"
     assert result["verification"]["all_verified"]
@@ -191,8 +194,8 @@ def test_provider_failure_is_safe_and_preserves_verified_partial_effects(service
 @pytest.mark.parametrize("response", ["malformed", AIMessage(content="", tool_calls=[{"name": "get_customer", "args": {"customer_id": 1}, "id": None}]),
                                        AIMessage(content="", invalid_tool_calls=[{"name": "get_customer", "args": "bad JSON", "id": "bad", "error": "parse failure"}])])
 def test_malformed_model_response_cannot_complete(service, response):
-    result = run_agent("Inspect", service, model=FakeModel([response]))
-    assert result["status"] == "failed"
+    result = run_agent("Inspect", service, model=FakeModel([response] * 2))
+    assert result["status"] == "failed" and "correction budget" in result["reason"]
 
 
 def test_reasoning_metadata_is_not_kept_in_history_or_trace(service):
@@ -250,7 +253,11 @@ def test_real_chatgroq_configuration_constructs_and_binds_offline(service, monke
     assert model.reasoning_effort == "low"
     assert model.model_kwargs["include_reasoning"] is False
     assert model.max_retries == 0
-    model.bind_tools(list(build_tools(service).values()))  # Construction only; no invocation.
+    bound = model.bind_tools([*build_tools(service).values(), completion_tool()], tool_choice="required")
+    assert bound.kwargs["tool_choice"] == "required"
+    schema = next(tool["function"]["parameters"] for tool in bound.kwargs["tools"]
+                  if tool["function"]["name"] == COMPLETION_TOOL)
+    assert set(schema["required"]) >= {"action", "requirements", "status"}
 
 
 def test_public_trace_redacts_credentials_and_secret_fields():
@@ -281,14 +288,201 @@ def test_one_rate_limit_retry_honors_header_and_does_not_log_raw_error(service, 
     monkeypatch.setattr(agent_module.time, "sleep", waits.append)
     error = RateLimitError("private provider error", response=response, body=None)
     result = run_agent("Handle preference", service, model=FakeModel([error, *happy_replies()]))
-    assert result["status"] == "completed" and waits == [0.2]
+    assert result["status"] == "completed" and waits == [0.35]
     assert any(event["event"] == "rate_limit_wait" for event in result["trace"])
     assert "private provider" not in json.dumps(result)
 
 
 def test_fenced_public_json_is_accepted_without_displaying_raw_model_text(service):
-    proposal = finish()
-    proposal.content = "```json\n" + proposal.content + "\n```"
+    update = call("update_customer_preferences", PREFERENCE, requirements=REQUIREMENTS)
+    update.content = "```json\n" + update.content + "\n```"
     result = run_agent("Handle preference", service, model=FakeModel([
-        call("update_customer_preferences", PREFERENCE), call("update_ticket", CLOSE), proposal]))
+        update, call("update_ticket", CLOSE), finish()]))
     assert result["status"] == "completed"
+
+
+@pytest.mark.parametrize("content", ["", "All done", "{not JSON}", json.dumps({"status": "completed", "requirements": REQUIREMENTS})])
+def test_text_only_completion_is_bounded_without_writes(service, store, content):
+    before = store.snapshot()
+    model = FakeModel([AIMessage(content=content)] * 10)
+    result = run_agent("Opt out and close", service, model=model)
+    assert result["status"] == "failed" and "correction budget" in result["reason"]
+    assert len(model.histories) == 2 and result["tool_calls"] == 0
+    assert store.snapshot() == before
+    assert len([event for event in result["trace"] if event["event"] == "model_error"]) == 2
+
+
+def test_empty_response_recovers_with_native_calls_and_no_text(service):
+    replies = happy_replies()
+    for reply in replies:
+        reply.content = ""  # Provider-native calls do not need public JSON content.
+    model = FakeModel([AIMessage(content=""), *replies])
+    result = run_agent("Handle opt out", service, model=model)
+    assert result["status"] == "completed" and len(model.histories) == 7
+    assert result["verification"]["all_verified"]
+    assert "complete_run" in model.histories[1][-1].content
+
+
+def test_valid_business_calls_survive_non_json_response_text(service):
+    replies = happy_replies()
+    for reply in replies:
+        reply.content = "Next action selected."
+    result = run_agent("Handle opt out", service, model=FakeModel(replies))
+    assert result["status"] == "completed"
+    assert not any(event["event"] == "model_error" for event in result["trace"])
+    assert "Next action selected" not in json.dumps(result)
+
+
+def test_invalid_completion_arguments_are_typed_errors_then_recover(service):
+    bad = call(COMPLETION_TOOL, {"status": "completed", "requirements": [
+        {"entity_type": "customer", "entity_id": 1, "expected": {"unsupported": True}}]})
+
+    def recover(messages):
+        assert isinstance(messages[-1], ToolMessage)
+        assert json.loads(messages[-1].content)["error"]["code"] == "invalid_completion"
+        return call("update_customer_preferences", PREFERENCE)
+
+    result = run_agent("Opt out and close", service, model=FakeModel([
+        bad, recover, call("update_ticket", CLOSE), finish()]))
+    assert result["status"] == "completed"
+
+
+def test_repeated_invalid_completion_signals_stop_gracefully(service, store):
+    before = store.snapshot()
+    model = FakeModel([call(COMPLETION_TOOL, {"status": "running"})] * 10)
+    result = run_agent("Handle opt out", service, model=model)
+    assert result["status"] == "failed" and "correction budget" in result["reason"]
+    assert len(model.histories) == 2 and store.snapshot() == before
+
+
+def test_completion_cannot_share_batch_with_business_write(service, store):
+    before = store.snapshot()
+    mixed = finish()
+    mixed.tool_calls.append({"name": "update_customer_preferences", "args": PREFERENCE, "id": "write", "type": "tool_call"})
+    model = FakeModel([mixed, finish(status="blocked", blockers=["Invalid batch corrected; no action performed"])])
+    result = run_agent("Opt out", service, model=model)
+    assert result["status"] == "blocked" and store.snapshot() == before
+    assert not result["verification"]["actions"]
+    assert any(event.get("result", {}).get("error", {}).get("code") == "invalid_completion" for event in result["trace"])
+
+
+def test_invalid_completion_after_write_preserves_verified_partial(service):
+    model = FakeModel([call("update_customer_preferences", PREFERENCE), AIMessage(content=""), AIMessage(content="")])
+    result = run_agent("Opt out and close", service, model=model)
+    assert result["status"] == "partial" and result["verification"]["verified_action_count"] == 1
+    assert "correction budget" in result["reason"]
+
+
+def quota_error(headers):
+    import httpx
+    from groq import RateLimitError
+    response = httpx.Response(429, headers=headers,
+                              request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"))
+    return RateLimitError("private quota payload gsk_fake_secret", response=response, body=None)
+
+
+def test_token_reset_overrides_short_retry_after_and_recovers(service, monkeypatch):
+    import ai_employee.agent as agent_module
+    now = [0.0]
+    waits = []
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: now[0])
+    def sleep(seconds):
+        waits.append(seconds)
+        now[0] += seconds
+    monkeypatch.setattr(agent_module.time, "sleep", sleep)
+    error = quota_error({"retry-after": "1", "x-ratelimit-limit-tokens": "8000",
+                         "x-ratelimit-remaining-tokens": "100", "x-ratelimit-reset-tokens": "47s",
+                         "x-ratelimit-remaining-requests": "998", "x-ratelimit-reset-requests": "14m"})
+    result = run_agent("Opt out and close", service, model=FakeModel([error, *happy_replies()]))
+    assert result["status"] == "completed" and waits == [47.25]
+    event = next(event for event in result["trace"] if event["event"] == "rate_limit_wait")
+    assert event["seconds"] == 47.25 and event["headers"]["x-ratelimit-limit-tokens"] == "8000"
+    assert "private quota" not in json.dumps(result) and "gsk_fake" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("headers,timeout", [
+    ({"retry-after": "1", "x-ratelimit-reset-tokens": "47s"}, 50),
+    ({"retry-after": "1", "x-ratelimit-reset-tokens": "1m10s"}, 180),
+    ({"retry-after": "1", "x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "14m"}, 180),
+    ({"retry-after": "garbage", "x-ratelimit-reset-tokens": "NaN"}, 180),
+    ({}, 180),
+])
+def test_rate_limit_without_safe_wait_fails_without_retry(service, store, monkeypatch, headers, timeout):
+    import ai_employee.agent as agent_module
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(agent_module.time, "sleep", lambda _: pytest.fail("Must not wait or retry outside budget"))
+    before = store.snapshot()
+    model = FakeModel([quota_error(headers)])
+    result = run_agent("Opt out", service, model=model, timeout_seconds=timeout)
+    assert result["status"] == "failed" and len(model.histories) == 1
+    assert "rate/usage limit" in result["reason"] and store.snapshot() == before
+    assert result["trace"][-2]["event"] == "provider_error"
+
+
+def test_repeated_429_retries_only_once_and_reports_partial(service, monkeypatch):
+    import ai_employee.agent as agent_module
+    waits = []
+    monkeypatch.setattr(agent_module.time, "sleep", waits.append)
+    error = quota_error({"retry-after": "1", "x-ratelimit-reset-tokens": "47s"})
+    model = FakeModel([call("update_customer_preferences", PREFERENCE), error, error, finish()])
+    result = run_agent("Opt out and close", service, model=model)
+    assert result["status"] == "partial" and len(model.histories) == 3
+    assert waits == [47.25] and result["verification"]["verified_action_count"] == 1
+
+
+def test_deadline_rechecked_after_provider_wait(service, monkeypatch):
+    import ai_employee.agent as agent_module
+    now = [0.0]
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(agent_module.time, "sleep", lambda _: now.__setitem__(0, 181))
+    model = FakeModel([quota_error({"x-ratelimit-reset-tokens": "47s"}), finish()])
+    result = run_agent("Opt out", service, model=model)
+    assert result["status"] == "failed" and len(model.histories) == 1
+    assert "time budget exhausted" in result["reason"]
+
+
+def rejected_generation(body):
+    import httpx
+    from groq import BadRequestError
+    response = httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"))
+    return BadRequestError("private provider message", response=response, body=body)
+
+
+def test_provider_rejected_tool_generation_uses_bounded_correction_then_completion(service):
+    error = rejected_generation({"error": {"code": "tool_use_failed", "failed_generation": "PRIVATE_REASONING gsk_fake_secret"}})
+    model = FakeModel([call("update_customer_preferences", PREFERENCE), call("update_ticket", CLOSE), error, finish()])
+    result = run_agent("Opt out and close", service, model=model)
+    assert result["status"] == "completed" and result["verification"]["all_verified"]
+    event = next(event for event in result["trace"] if event["event"] == "provider_error")
+    assert event["http_status"] == 400 and event["error_code"] == "tool_use_failed"
+    assert event["tool_generation_rejected"]
+    assert "PRIVATE_REASONING" not in json.dumps(result) and "gsk_fake" not in json.dumps(result)
+
+
+def test_provider_generation_rejections_share_format_correction_budget(service):
+    error = rejected_generation({"error": {"failed_generation": {"attempted_arguments": "private"}}})
+    model = FakeModel([error] * 10)
+    result = run_agent("Handle opt out", service, model=model)
+    assert result["status"] == "failed" and len(model.histories) == 2
+    assert "correction budget" in result["reason"]
+
+
+@pytest.mark.parametrize("code", ["gsk_fake_do_not_print", {"malformed": "code"}])
+def test_unrelated_bad_request_is_not_retried_and_error_code_is_allowlisted(service, code):
+    error = rejected_generation({"error": {"code": code, "message": "PRIVATE_REASONING"}})
+    model = FakeModel([error, finish()])
+    result = run_agent("Handle opt out", service, model=model)
+    assert result["status"] == "failed" and len(model.histories) == 1
+    assert "HTTP 400" in result["reason"]
+    assert "gsk_fake" not in json.dumps(result) and "PRIVATE_REASONING" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("headers,expected", [
+    ({"x-ratelimit-reset-tokens": "1m2.5s", "retry-after": "1"}, 62.5),
+    ({"x-ratelimit-reset-tokens": "47.5s", "retry-after": "50"}, 50),
+    ({"retry-after-ms": "1500"}, 1.5),
+    ({"retry-after": "-1", "x-ratelimit-reset-tokens": "bad"}, None),
+    ({"retry-after": "inf"}, None),
+])
+def test_rate_header_duration_parsing(headers, expected):
+    assert rate_limit_delay(headers) == expected

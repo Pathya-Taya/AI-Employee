@@ -3,16 +3,19 @@
 import json
 import operator
 import math
+import re
 import time
+from email.utils import parsedate_to_datetime
 from typing import Annotated, Literal, TypedDict
 
 from groq import APIConnectionError, APIStatusError, APITimeoutError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import Field, ValidationError
 
-from .config import ConfigurationError, disable_external_tracing, load_model
+from .config import ConfigurationError, MODEL_TIMEOUT_SECONDS, disable_external_tracing, load_model
 from .contracts import Input
 from .service import CompanyService
 from .tools import build_tools
@@ -29,9 +32,8 @@ invent intent, records, permissions, or success. Recover from structured errors
 when feasible. Business writes must use the supplied tools. Do not send messages.
 Use one tool call per turn when its result is needed for the next action.
 Give only short public operational status, never hidden reasoning or analysis.
-When possible put public status in a JSON content object (tool calls are separate):
-{"plan":["up to four short operational steps"],"action":"brief next action",
- "requirements":[],"status":"running","blockers":[]}
+Business tool calls need no response text. Optional public plan/action/requirements
+JSON alongside a business call is accepted, but never a terminal declaration.
 After discovering targets, declare every requested final postcondition in
 requirements: {"entity_type":"customer|ticket|task","entity_id":123,
 "expected":{"field":value}}. Customer fields: marketing_emails_enabled;
@@ -40,9 +42,11 @@ For a preference request that must be closed, include BOTH the customer's
 requested preference and the ticket's resolved status. For a broader goal,
 enumerate all identified targets; do not silently drop difficult ones.
 Requirements declared earlier remain binding; declare desired final values only.
-The operational plan may change as you observe results. When stopping, call no
-tools and return ONLY the JSON object with plan, action, requirements, status
-(completed, partial, or blocked), and blockers (short concrete descriptions).
+The operational plan may change as you observe results. Every response must use
+a business tool or the typed complete_run tool. When stopping, call complete_run
+ALONE with plan, action, requirements, status (completed, partial, or blocked),
+and blockers (short concrete descriptions). Free-form text or JSON content does
+not stop execution. complete_run declares outcomes; it performs no business writes.
 Your proposed completion will be independently checked against persisted state
 and audits. Tool success text and your final words are not proof. Missing info
 or permission means blocked/partial. An engineering task arranges follow-up,
@@ -56,6 +60,64 @@ class PublicUpdate(Input):
     requirements: list[Requirement] = Field(default_factory=list, max_length=24)
     status: Literal["running", "completed", "partial", "blocked"] = "running"
     blockers: list[str] = Field(default_factory=list, max_length=24)
+
+
+COMPLETION_TOOL = "complete_run"
+MAX_INVALID_RESPONSES = 2  # One correction; a second invalid response stops the run.
+MAX_RATE_LIMIT_WAIT = 60
+RESET_BUFFER_SECONDS = 0.25
+
+
+class CompletionProposal(PublicUpdate):
+    """Public outcome declaration only; actual success requires SQLite evidence."""
+
+    action: str = Field(min_length=1, max_length=300)
+    requirements: list[Requirement] = Field(max_length=24)
+    status: Literal["completed", "partial", "blocked"]
+
+
+def completion_tool():
+    def signal(**arguments):
+        return {"ok": True, "data": CompletionProposal.model_validate(arguments).model_dump()}
+
+    return StructuredTool.from_function(
+        func=signal, name=COMPLETION_TOOL, args_schema=CompletionProposal,
+        description="Declare all requested final postconditions and completed/partial/blocked status. Call alone when stopping. This does not write business state or prove success; independent verification follows.",
+        handle_validation_error=lambda _: {"ok": False, "error": {
+            "code": "invalid_completion", "message": "Completion arguments must match the complete_run schema; include status, action and explicit requirements."}},
+    )
+
+
+def reset_seconds(value: str | None) -> float | None:
+    """Parse Groq reset durations (47s, 1m2.5s) or numeric seconds safely."""
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        match = re.fullmatch(r"(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?", value.strip())
+        if not match or not any(match.groups()):
+            return None
+        seconds = sum(float(part or 0) * scale for part, scale in zip(match.groups(), (3600, 60, 1)))
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def rate_limit_delay(headers: dict) -> float | None:
+    """Honor the longest relevant reset, never the short Retry-After alone."""
+    delays = [reset_seconds(headers.get("retry-after")), reset_seconds(headers.get("x-ratelimit-reset-tokens"))]
+    milliseconds = reset_seconds(headers.get("retry-after-ms"))
+    if milliseconds is not None:
+        delays.append(milliseconds / 1000)
+    if headers.get("retry-after") and delays[0] is None:
+        try:
+            delays.append(max(0, parsedate_to_datetime(headers["retry-after"]).timestamp() - time.time()))
+        except (ValueError, TypeError, OverflowError):
+            pass
+    # Request headers describe the daily window; do not wait for it unless exhausted.
+    if headers.get("x-ratelimit-remaining-requests") == "0":
+        delays.append(reset_seconds(headers.get("x-ratelimit-reset-requests")))
+    valid = [delay for delay in delays if delay is not None]
+    return max(valid) if valid else None
 
 
 class AgentState(TypedDict):
@@ -72,6 +134,8 @@ class AgentState(TypedDict):
     halt_reason: str
     verification: dict
     retry_verification: bool
+    invalid_responses: int
+    correcting: bool
 
 
 def provider_problem(error: Exception) -> str:
@@ -84,14 +148,15 @@ def provider_problem(error: Exception) -> str:
                     403: "Groq denied access; check model permissions in the Groq console.",
                     404: "Groq model unavailable; check openai/gpt-oss-120b access.",
                     429: "Groq rate/usage limit reached; check console limits and retry after reset."}
-        return messages.get(error.status_code, "Groq rejected or failed the request; check provider status/model support.")
+        return messages.get(error.status_code, f"Groq rejected or failed the request (HTTP {error.status_code}); check provider status/model support.")
     return "Model invocation failed; check dependency compatibility/provider availability."
 
 
 def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=24, timeout_seconds=180, emit=None):
     """No workflow encoded here. Sequential tools preserve dependent writes."""
     tools = build_tools(service)
-    bound = model.bind_tools(list(tools.values()))
+    tools[COMPLETION_TOOL] = completion_tool()
+    bound = model.bind_tools(list(tools.values()), tool_choice="required")
     started = time.monotonic()
 
     def log(kind, **details):
@@ -115,36 +180,70 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
             return {"halt_reason": reason, "trace": [log("limit", reason=reason)]}
         step = state["steps"] + 1
         provider_events = []
+
+        def invalid_response(reason, validation=None):
+            count = state["invalid_responses"] + 1
+            halt = "Model response correction budget exhausted." if count >= MAX_INVALID_RESPONSES else ""
+            return {"steps": step, "proposal": {}, "invalid_responses": count, "correcting": not halt,
+                    "halt_reason": halt,
+                    "messages": [] if halt else [HumanMessage(content="Response format invalid. Use a named business tool with valid arguments, or call complete_run alone with status, action and explicit requirements. No text-only completion.")],
+                    "trace": provider_events + [log("model_error", reason=reason, validation=validation or [],
+                                                   invalid_responses=count, correction_requested=not halt)]}
+
         for attempt in range(2):
             try:
                 response = bound.invoke(state["messages"], config={"callbacks": []})
                 break
             except Exception as error:
                 headers = {}
+                diagnostic = {}
                 if isinstance(error, APIStatusError):
+                    details = error.body if isinstance(error.body, dict) else {}
+                    details = details.get("error", details)
+                    details = details if isinstance(details, dict) else {}
+                    code = details.get("code") if isinstance(details.get("code"), str) else None
+                    # Never retain error messages, failed_generation, or arbitrary codes.
+                    diagnostic = {"http_status": error.status_code,
+                                  "error_code": code if code in {"tool_use_failed", "invalid_request_error", "rate_limit_exceeded"} else None,
+                                  "tool_generation_rejected": "failed_generation" in details or code == "tool_use_failed"}
+                    if error.status_code == 400 and diagnostic["tool_generation_rejected"]:
+                        provider_events.append(log("provider_error", reason="Groq rejected model tool generation; requesting bounded format correction.", **diagnostic))
+                        return invalid_response("Provider rejected structured tool generation.")
                     headers = {name: error.response.headers[name] for name in (
-                        "retry-after", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens",
+                        "retry-after", "retry-after-ms", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens",
                         "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests") if name in error.response.headers}
-                try:
-                    wait = float(headers.get("retry-after", "nan"))
-                except ValueError:
-                    wait = float("nan")
+                wait = rate_limit_delay(headers)
                 remaining = timeout_seconds - (time.monotonic() - started)
                 if (isinstance(error, APIStatusError) and error.status_code == 429 and attempt == 0
-                        and math.isfinite(wait) and 0 <= wait <= 60 and wait + 1 < remaining):
-                    provider_events.append(log("rate_limit_wait", seconds=wait, headers=headers, retry=1))
-                    time.sleep(wait + 0.1)
+                        and wait is not None and wait + RESET_BUFFER_SECONDS <= MAX_RATE_LIMIT_WAIT
+                        and wait + RESET_BUFFER_SECONDS + MODEL_TIMEOUT_SECONDS < remaining):
+                    provider_events.append(log("rate_limit_wait", seconds=wait + RESET_BUFFER_SECONDS,
+                                               headers=headers, retry=1, remaining_seconds=round(remaining, 2)))
+                    time.sleep(wait + RESET_BUFFER_SECONDS)
+                    if time.monotonic() - started >= timeout_seconds:
+                        return {"steps": step, "halt_reason": "Run time budget exhausted during provider wait.",
+                                "trace": provider_events + [log("limit", reason="Run time budget exhausted during provider wait.")]}
                     continue
                 reason = provider_problem(error)
+                skipped = ""
+                if isinstance(error, APIStatusError) and error.status_code == 429:
+                    if attempt:
+                        skipped = "The single rate-limit retry was already used."
+                    elif wait is None:
+                        skipped = "No usable retry/reset header."
+                    elif wait + RESET_BUFFER_SECONDS > MAX_RATE_LIMIT_WAIT:
+                        skipped = "Provider reset exceeds the 60-second wait cap."
+                    else:
+                        skipped = "Reset wait and request timeout exceed the remaining run budget."
                 return {"steps": step, "halt_reason": reason,
-                        "trace": provider_events + [log("provider_error", reason=reason, headers=headers)]}
+                        "trace": provider_events + [log("provider_error", reason=reason, headers=headers,
+                            suggested_wait_seconds=wait, remaining_seconds=round(max(0, remaining), 2),
+                            retry_skipped=skipped, **diagnostic)]}
         if not isinstance(response, AIMessage) or response.invalid_tool_calls:
-            return {"steps": step, "halt_reason": "Malformed model/tool-call response.",
-                    "trace": [log("model_error", reason="Malformed model/tool-call response.")]}
+            return invalid_response("Malformed model/tool-call response.")
         calls = response.tool_calls
         if any(not call.get("id") or not isinstance(call.get("args"), dict) for call in calls):
-            return {"steps": step, "halt_reason": "Malformed tool call ID or arguments.",
-                    "trace": [log("model_error", reason="Malformed tool call ID or arguments.")]}
+            return invalid_response("Malformed tool call ID or arguments.")
         public = None
         public_errors = []
         if isinstance(response.content, str) and response.content:
@@ -158,10 +257,8 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
                                  for item in error.errors(include_input=False, include_context=False)]
             except ValueError:
                 pass  # Never display free-form text or reasoning as a success claim.
-        if not calls and public is None:
-            return {"steps": step, "proposal": {},
-                    "messages": [HumanMessage(content="Return a valid public JSON status object with explicit requirements, or use tools to gather missing evidence.")],
-                    "trace": provider_events + [log("model_error", reason="Missing valid structured completion proposal; requesting correction.", validation=public_errors)]}
+        if not calls:
+            return invalid_response("Missing typed tool call or complete_run signal.", public_errors)
         # Discard additional_kwargs, reasoning fields, and raw metadata entirely.
         clean_message = AIMessage(content=public.model_dump_json() if public else "", tool_calls=calls)
         requirements = list(state["requirements"])
@@ -173,7 +270,7 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
         plan = public.plan if public and public.plan else state["plan"]
         public_action = public.action if public else "Model selected: " + ", ".join(call["name"] for call in calls)
         return {"steps": step, "messages": [clean_message], "plan": plan, "requirements": requirements,
-                "proposal": public.model_dump() if public and not calls else {},
+                "proposal": {}, "correcting": False,
                 "trace": provider_events + [log("agent", step=step, plan=plan, action=public_action,
                               selected_tools=[call["name"] for call in calls])]}
 
@@ -181,7 +278,13 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
         messages, events, actions = [], [], []
         count = state["tool_calls"]
         halt = ""
-        for call in state["messages"][-1].tool_calls:
+        proposal = {}
+        requirements, plan = list(state["requirements"]), state["plan"]
+        invalid_count = state["invalid_responses"]
+        calls = state["messages"][-1].tool_calls
+        mixed_completion = len(calls) > 1 and any(call["name"] == COMPLETION_TOOL for call in calls)
+        invalid_completion = mixed_completion
+        for call in calls:
             name, arguments = call["name"], call["args"]
             if count >= max_tool_calls or time.monotonic() - started >= timeout_seconds:
                 halt = "Tool execution or run time budget exhausted."
@@ -189,7 +292,9 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
             else:
                 count += 1
                 events.append(log("tool_call", number=count, tool=name, arguments=arguments))
-                if name not in tools:
+                if mixed_completion:
+                    result = {"ok": False, "error": {"code": "invalid_completion", "message": "Call complete_run alone; no calls in this batch were executed."}}
+                elif name not in tools:
                     result = {"ok": False, "error": {"code": "unknown_tool", "message": "Tool is not in the available registry."}}
                 else:
                     try:
@@ -198,11 +303,28 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
                             raise ValueError("Malformed observation")
                     except Exception:
                         result = {"ok": False, "error": {"code": "tool_error", "message": "Tool execution failed; persisted effects require independent verification."}}
-                if name in WRITES:
+                if name == COMPLETION_TOOL and not mixed_completion:
+                    if result["ok"]:
+                        proposal = result["data"]
+                        plan = proposal["plan"] or plan
+                        for requirement in proposal["requirements"]:
+                            if requirement not in requirements:
+                                requirements.append(requirement)
+                        events.append(log("completion_proposal", **proposal))
+                    else:
+                        invalid_completion = True
+                if name in WRITES and not mixed_completion:
                     actions.append({"tool": name, "arguments": arguments, "result": result})
             events.append(log("observation", tool=name, result=result))
             messages.append(ToolMessage(content=json.dumps(result), tool_call_id=call["id"], name=name))
-        return {"messages": messages, "trace": events, "actions": actions, "tool_calls": count, "halt_reason": halt}
+        if invalid_completion:
+            invalid_count += 1
+            if invalid_count >= MAX_INVALID_RESPONSES:
+                halt = "Model response correction budget exhausted."
+            events.append(log("model_error", reason="Invalid typed completion signal.", invalid_responses=invalid_count,
+                              correction_requested=not halt))
+        return {"messages": messages, "trace": events, "actions": actions, "tool_calls": count, "halt_reason": halt,
+                "proposal": proposal, "plan": plan, "requirements": requirements, "invalid_responses": invalid_count}
 
     def verify_node(state):
         try:
@@ -233,6 +355,8 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
     def after_agent(state):
         if state["halt_reason"]:
             return "verify"
+        if state["correcting"]:
+            return "agent"
         return "tools" if isinstance(state["messages"][-1], AIMessage) and state["messages"][-1].tool_calls else "verify"
 
     graph = StateGraph(AgentState)
@@ -240,8 +364,8 @@ def build_graph(service: CompanyService, model, *, max_steps=16, max_tool_calls=
     graph.add_node("tools", tools_node)
     graph.add_node("verify", verify_node)
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", after_agent, {"tools": "tools", "verify": "verify"})
-    graph.add_conditional_edges("tools", lambda state: "verify" if state["halt_reason"] else "agent", {"verify": "verify", "agent": "agent"})
+    graph.add_conditional_edges("agent", after_agent, {"tools": "tools", "verify": "verify", "agent": "agent"})
+    graph.add_conditional_edges("tools", lambda state: "verify" if state["halt_reason"] or state["proposal"] else "agent", {"verify": "verify", "agent": "agent"})
     graph.add_conditional_edges("verify", lambda state: "agent" if state["retry_verification"] else END, {"agent": "agent", END: END})
     return graph.compile()
 
@@ -262,7 +386,8 @@ def run_agent(goal: str, service: CompanyService, *, model=None, max_steps=16, m
     initial = {"goal": goal, "messages": [SystemMessage(content=SYSTEM), HumanMessage(content=goal)],
                "trace": [], "actions": [], "plan": ["Discover relevant state and policies", "Perform permitted actions", "Verify persisted outcomes"],
                "requirements": [], "proposal": {}, "steps": 0, "tool_calls": 0, "status": "running",
-               "halt_reason": "", "verification": {}, "retry_verification": False}
+               "halt_reason": "", "verification": {}, "retry_verification": False,
+               "invalid_responses": 0, "correcting": False}
     state = initial
     try:
         # Stream internal values only into local state; never print message objects.

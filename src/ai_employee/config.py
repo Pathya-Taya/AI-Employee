@@ -8,6 +8,7 @@ from langchain_groq import ChatGroq
 from pydantic import SecretStr
 
 MODEL = "openai/gpt-oss-120b"
+MODEL_TIMEOUT_SECONDS = 30
 
 
 class ConfigurationError(Exception):
@@ -28,5 +29,5 @@ def load_model(env_path: Path | None = None):
     if not key or key.lower() in {"your_groq_api_key_here", "...", "replace_me"}:
         raise ConfigurationError("Set GROQ_API_KEY in local .env to a valid key from the Groq console. Do not paste it into chat.")
     return ChatGroq(model=MODEL, api_key=SecretStr(key), temperature=0,
-                    timeout=30, max_retries=0, max_tokens=1200, reasoning_effort="low",
+                    timeout=MODEL_TIMEOUT_SECONDS, max_retries=0, max_tokens=1200, reasoning_effort="low",
                     model_kwargs={"include_reasoning": False})
