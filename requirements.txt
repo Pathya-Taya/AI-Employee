@@ -1,3 +1,4 @@
-# M0 only; use the existing Python 3.11 virtual environment.
+# M0/M1 setup (runtime pins are in pyproject.toml).
+-e .[test]
 langchain-groq==1.1.3
 python-dotenv==1.2.4
