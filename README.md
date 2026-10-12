@@ -90,11 +90,23 @@ writes; the combined run returned `partial` with four verified writes and all
 three discovered tickets accounted for. Ticket 3 remained open with an explicit
 missing-information blocker. Both runs recovered from HTTP 429 and tool-generation
 HTTP 400. Neither retrieved a valid policy document: the combined run tried an
-unknown policy ID and continued. The generic policy-reading instruction does
-not guarantee model compliance; successful policy retrieval remains an unmet
-demonstration requirement. No defect repair or full procedural compliance is
+unknown policy ID and continued. These are the original M3 runs, before the
+policy-discovery patch below. No defect repair or full procedural compliance is
 claimed. Sanitized traces and independent snapshots are preserved under ignored
 `logs/m3-engineering-*` and `logs/m3-combined-*`; `progress.md` records details.
+
+Policy tools now advertise the current allowlisted IDs/titles, describe exact-ID
+selection, and return discovery guidance after an invalid lookup. This metadata
+contains no document contents: actual consultation still requires a model-selected
+`read_policy` call. The patch's single live run selected
+`search_customers → search_tickets → read_policy(ticket_lifecycle) → create_task →
+update_ticket → complete_run`, retrieved the valid Markdown document before
+writes, and returned `completed` with two independently verified actions.
+Separate inspection confirmed ticket 2 escalated and linked to engineering task 2,
+with audits 3/4. Evidence is under ignored `logs/m3-policy-discovery-*`.
+The model did not list policies, read the separate escalation document, or select
+`get_task`; discovery/relevance and full procedural compliance remain model-dependent.
+All 140 offline tests passed; no new dependency or business rule was introduced.
 
 Defaults: 16 model steps, 24 tool executions, 180 seconds of elapsed run budget,
 30-second model request timeout, and at most one retry per model step on HTTP 429

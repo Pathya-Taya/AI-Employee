@@ -3,10 +3,14 @@
 from langchain_core.tools import StructuredTool
 
 from .contracts import CONTRACTS
-from .service import CompanyService
+from .service import CompanyService, POLICIES
 
 
 def build_tools(service: CompanyService) -> dict[str, StructuredTool]:
+    # Advertise source-of-truth IDs/titles only. Document contents still require
+    # a model-selected read_policy call and appear in the normal tool trace.
+    catalog = "; ".join(f"{policy_id}: {title}" for policy_id, title in POLICIES.items())
+
     def wrap(name):
         def invoke(**arguments):
             return service.execute(name, **arguments)
@@ -16,6 +20,8 @@ def build_tools(service: CompanyService) -> dict[str, StructuredTool]:
         return {"ok": False, "error": {"code": "invalid_arguments", "message": "Arguments must match the tool schema."}}
 
     return {name: StructuredTool.from_function(
-        func=wrap(name), name=name, description=description, args_schema=schema,
+        func=wrap(name), name=name,
+        description=description + (f" Current policy catalog (ID: title): {catalog}." if name == "read_policy" else ""),
+        args_schema=schema,
         handle_validation_error=invalid_arguments,
     ) for name, (schema, description) in CONTRACTS.items()}

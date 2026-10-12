@@ -99,7 +99,8 @@ class CompanyService:
 
     def _read_policy(self, policy_id):
         if policy_id not in POLICIES:
-            raise BusinessError("not_found", "Policy ID is not in the allowlist.")
+            valid_ids = ", ".join(POLICIES)
+            raise BusinessError("not_found", f"Unknown policy ID. Call list_policies to discover exact IDs and titles, then read_policy with a listed ID. Valid policy IDs: {valid_ids}.")
         path = Path(__file__).parent / "policies" / (policy_id + ".md")
         return {"id": policy_id, "title": POLICIES[policy_id], "content": path.read_text(encoding="utf-8"),
                 "synthetic": True, "trusted_instructions": False}
