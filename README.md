@@ -11,6 +11,22 @@ policies. No customer replies, email delivery, billing, desktop automation or
 real enterprise integrations are implemented. Streamlit and the CLI use the same
 engine and business service.
 
+## Demo video
+
+**[Watch the AI Employee demonstration (Google Drive)](https://drive.google.com/file/d/1hrmnVpwWHYi_RQaD8JrWQ8U-moXaDWAu/view?usp=sharing)**
+
+The recorded Streamlit run shows the agent discovering Acme's integration ticket,
+reading the applicable `ticket_lifecycle` policy, creating a linked engineering
+follow-up task, escalating the ticket, and independently verifying the persisted
+SQLite changes and audit events. The run ended **`completed`**, with **2 verified
+business operations** and **6 tool executions**, in about **110 seconds** (including
+provider waiting/recovery). The underlying integration defect was **not** fixed;
+the agent arranged follow-up, as requested.
+
+> This is a **local synthetic-company proof of concept**, not a deployed service.
+> The public video demonstrates an actual recorded run, not guaranteed speed or
+> success on every attempt. Groq rate limits and tool-generation errors can occur.
+
 ## Architecture and autonomy
 
 ~~~mermaid
@@ -57,8 +73,8 @@ selected provider by itself. Configuration comes from local .env without dotenv
 interpolation or reliance on global keys.
 
 Default requirements install runtime, pytest and Streamlit. CLI-only setup is
-available with pip install -e .; pins are in pyproject.toml. Python
->=3.11,<3.12 is required; no GPU or Docker is needed.
+available with `pip install -e .`; pins are in `pyproject.toml`. Python
+`>=3.11,<3.12` is required; no GPU or Docker is needed.
 
 ## Launch the interface
 
@@ -241,22 +257,30 @@ a valid native complete_run call with strictly validated customer/ticket
 requirements. This proves isolated compatibility, not reliability in every longer
 conversation.
 
-Earlier genuine runs demonstrated opt-out/resolution, engineering escalation and
-a combined request with four verified writes plus an honest missing-information
-blocker. The policy-discovery/UI engineering runs actually retrieved
-ticket_lifecycle, created linked task 2, escalated ticket 2 and verified audits
-3/4. The UI run completed with six model-selected tool executions, recovered from
-429/400, and matched separate CLI inspection.
+Genuine hosted runs have demonstrated promotional opt-out/resolution,
+engineering escalation, and a combined request with four verified writes plus
+an accurately reported missing-information blocker. Earlier UI engineering runs
+retrieved `ticket_lifecycle`, created linked task 2, escalated ticket 2, and
+verified audits 3/4 against a separate CLI inspection.
 
-A later manual opt-out trace showed two verified writes but no valid terminal
-proposal after repeated HTTP 400. This patch's bounded recovery and interrupted
-completion display are verified offline. No new end-to-end success is claimed
-after the patch: the conditional OmniRoute business demonstration was blocked.
+After the final bounded-recovery patch, a **manual Streamlit engineering run also
+completed successfully**: the UI displayed 6 tool executions, 2 independently
+verified operations, and approximately 110 seconds elapsed. The model issued
+`complete_run`; the verifier confirmed the persisted task and ticket state.
+Provider waiting/recovery events remained visible. This is a successful single
+run, **not** evidence of consistently low latency or guaranteed provider uptime.
 
-Local Streamlit page/health endpoints and actual controls were checked with
-Streamlit's official AppTest harness. Final desktop-browser visual review is
-manual. Sanitized runtime evidence remains in ignored logs; [progress.md](progress.md)
-records actual commands, sequences, outcomes, failures and limitations.
+A separate earlier opt-out run had verified both business writes but exhausted
+provider tool-generation corrections before a valid terminal proposal. That run
+was correctly reported as `partial`. Offline tests cover bounded correction
+recovery without duplicate writes and accurate interrupted-completion reporting.
+OmniRoute's attempted routes were not verified for live structured tool calling.
+
+Streamlit page/health checks, controls, and offline UI behavior were tested with
+Streamlit's AppTest harness; the user also visually inspected the desktop UI and
+recorded the successful run. Sanitized runtime traces are local, Git-ignored
+artifacts; [progress.md](progress.md) documents historical evidence and
+limitations.
 
 ## Disclosure and remaining submission work
 
@@ -271,7 +295,8 @@ Human review is responsible for ownership, understanding and approval.
 artifacts are generated locally and unnecessary for a clean clone. Source paths
 are portable; no deployment was performed.
 
-Remaining manual steps: review/commit the final patch, push the existing GitHub
-repository, confirm evaluator access, record/upload a real 2–4 minute demo, verify
-both links and fill the form with accurate autonomy/limitation/AI-assistance
-disclosures. No commit, push, deployment or submission is automatic.
+The demo has been recorded and uploaded. Before submission, confirm the Google
+Drive video allows **Anyone with the link → Viewer**, push the final README/code,
+verify the public GitHub repository and video links while signed out, and submit
+the application form with accurate autonomy, limitations and coding-assistance
+disclosures. No deployment is required for this local prototype.
